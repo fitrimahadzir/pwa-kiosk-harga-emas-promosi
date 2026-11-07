@@ -2,16 +2,16 @@
 
 <div align="center">
 
-![GitHub repo size](https://img.shields.io/github/repo-size/gold-reserve/kiosk-harga-emas)
-![GitHub language count](https://img.shields.io/github/languages/count/gold-reserve/kiosk-harga-emas)
-![GitHub forks](https://img.shields.io/github/forks/gold-reserve/kiosk-harga-emas)
-![GitHub stars](https://img.shields.io/github/stars/gold-reserve/kiosk-harga-emas)
-![GitHub issues](https://img.shields.io/github/issues/gold-reserve/kiosk-harga-emas)
+![GitHub repo size](https://img.shields.io/github/repo-size/fitrimahadzir/pwa-kiosk-harga-emas-promosi)
+![GitHub language count](https://img.shields.io/github/languages/count/fitrimahadzir/pwa-kiosk-harga-emas-promosi)
+![GitHub forks](https://img.shields.io/github/forks/fitrimahadzir/pwa-kiosk-harga-emas-promosi)
+![GitHub stars](https://img.shields.io/github/stars/fitrimahadzir/pwa-kiosk-harga-emas-promosi)
+![GitHub issues](https://img.shields.io/github/issues/fitrimahadzir/pwa-kiosk-harga-emas-promosi)
 
 </div>
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/gold-reserve/kiosk-harga-emas/main/public/banner-promosi.svg" alt="Gold Reserve Banner" width="100%" />
+  <img src="https://raw.githubusercontent.com/fitrimahadzir/pwa-kiosk-harga-emas-promosi/main/public/banner-promosi.svg" alt="Gold Reserve Banner" width="100%" />
 </div>
 
 ## 📖 Pengenalan
@@ -37,7 +37,7 @@ Aplikasi ini berasaskan **React 19**, **Tailwind CSS v4**, dan **Supabase** untu
 | 🔐 **Autentikasi Kod Outlet** | Pengesanan kakitangan melalui kod outlet unik (Supabase) |
 | 📱 **Progressive Web App** | Berfungsi sebagai aplikasi asli di peranti, sokongan offline |
 | 🔄 **Real-time Sync** | Sync harga & promosi merentas tab pengguna menggunakan BroadcastChannel |
-| 📴 **Offline Support** | Fungsi wajar tanpa sambungan 인터넷과 data disimpan dalam cache |
+| 📴 **Offline Support** | Fungsi wajar tanpa sambungan dan data disimpan dalam cache |
 
 ---
 
@@ -70,8 +70,8 @@ Aplikasi ini menggunakan palet warna **Gold Reserve** yang konsisten:
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/gold-reserve/kiosk-harga-emas.git
-cd kiosk-harga-emas
+git clone https://github.com/fitrimahadzir/pwa-kiosk-harga-emas-promosi.git
+cd pwa-kiosk-harga-emas-promosi
 
 # 2. Install dependencies
 npm install
@@ -100,22 +100,14 @@ npm run preview   # Paparkan build dalam mod preview
 ## 📦 Struktur Projek
 
 ```
-kiosk-harga-emas/
+pwa-kiosk-harga-emas-promosi/
 ├── public/                    # Aset statik
 │   ├── font/                  # Font The Seasons (self-hosted)
 │   └── images/                # Imej banner dan slaid
 ├── src/
 │   ├── components/            # Komponen React
-│   │   ├── AdminModal.tsx     # Modal pengurusan harga & promosi
-│   │   ├── CalculatorPage.tsx # Paparan kalkulator jualan
-│   │   ├── GoldPriceBoard.tsx # Papan harga emas
-│   │   ├── Header.tsx         # Bar navigasi atas
-│   │   ├── LoginPage.tsx      # Paparan log masuk
-│   │   ├── PromoCarousel.tsx  # Slaid promosi
-│   │   ├── QuotationModal.tsx # Modal quotation
-│   │   └── OfflineIndicator.tsx # Penunjuk status hubungan
 │   ├── hooks/                 # React hooks custom
-│   ├── lib/                   # Logik pembantu				 
+│   ├── lib/                   # Logik pembantu
 │   ├── types/                 # Definisi jenis TypeScript
 │   ├── utils/                 # Fungsi utiliti
 │   ├── index.css              # CSS global + Tailwind
@@ -126,7 +118,6 @@ kiosk-harga-emas/
 ├── package.json               # Metadata npm & skrip
 ├── vite.config.ts             # Konfigurasi Vite + PWA
 ├── tsconfig.json              # Konfigurasi TypeScript
-├── tailwind.config.js         # Konfigurasi Tailwind CSS
 └── README.md                  # Dokumentasi ini
 ```
 

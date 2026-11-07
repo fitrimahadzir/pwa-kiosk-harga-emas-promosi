@@ -1,23 +1,8 @@
-# Ignore everything by default
-*
-
-# Allow specific files and directories
+node_modules/
+dist/
+build/
+coverage/
+.DS_Store
+*.log
+.env*
 !.env.example
-!README.md
-!.gitignore
-!LICENSE
-!package.json
-!bun.lock
-!vite.config.ts
-!tsconfig.json
-!**/*.md
-!src/
-!public/
-!supabase/
-
-# Allow source files
-!src/**/*.{ts,tsx}
-
-# Allow public assets
-!public/**/*.{svg,png,jpg,jpeg,gif,webp,ico}
-!public/font/**/*.ttf

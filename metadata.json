@@ -1,0 +1,6 @@
+{
+  "name": "Gold Reserve - Kiosk Harga Emas & Promosi",
+  "description": "PWA sistem harga emas semasa (999, 916, 375), kalkulator jualan pantas, dan slaid promosi untuk kegunaan kaunter tablet.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
