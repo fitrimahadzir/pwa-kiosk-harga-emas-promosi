@@ -8,7 +8,11 @@ dan projek ini mematuhi formulasi [SemVer 2.0.0](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
-- Aplikasi PWA untuk harga emas semasa (999, 916, 375)
+- Multi-outlet pricing: setiap outlet boleh ada harga, promosi dan setting sendiri
+- Admin panel kini ada pilihan outlet untuk tukar konfigurasi per outlet
+- Real-time multi-kios menggunakan Supabase Realtime broadcast (tak perlu table baru)
+- Hook `useSupabaseRealtime` untuk langganan harga/promosi
+- OutletConfig type dan helper outlet-scoped di `src/utils/storage.ts`
 - Kalkulator jualan pantas untuk kegunaan kaunter
 - Paparan promosi slaid untuk promosi kedai
 - Autentikasi kod outlet menggunakan Supabase

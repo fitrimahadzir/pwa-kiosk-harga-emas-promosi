@@ -16,6 +16,7 @@ import {
   LogOut,
   Menu,
   LayoutDashboard,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -30,6 +31,9 @@ import { formatMYR } from '../utils/calculator';
 interface AdminModalProps {
   isOpen: boolean;
   onClose: () => void;
+  currentOutletName: string;
+  onSelectOutlet: (outletName: string) => void;
+  availableOutlets: string[];
   prices: Record<GoldPurity, GoldPriceItem>;
   onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => void;
   promos: PromoItem[];
@@ -123,6 +127,9 @@ function StatCard({
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
+  currentOutletName,
+  onSelectOutlet,
+  availableOutlets,
   prices,
   onUpdatePrices,
   promos,
@@ -135,6 +142,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>('prices');
   const [navOpen, setNavOpen] = useState(false);
 
+  const [outletMenuOpen, setOutletMenuOpen] = useState(false);
   const [draftPrices, setDraftPrices] = useState<Record<GoldPurity, GoldPriceItem>>(prices);
   const [priceNote, setPriceNote] = useState<string>('Pelarasan harga semasa');
   const [priceSuccessMsg, setPriceSuccessMsg] = useState<string>('');
@@ -253,9 +261,35 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <img src="/SVG/favicon.svg" alt="" aria-hidden="true" className="size-10 shrink-0 rounded-lg" />
           <div className="min-w-0">
             <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-4 w-auto max-w-full" />
-            <p className="mt-1.5 text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40">
-              {settings.outletName || 'HeadQuarters'}
-            </p>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOutletMenuOpen((open) => !open)}
+                className="inline-flex items-center gap-1 text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40 hover:text-cream"
+              >
+                {currentOutletName || 'HeadQuarters'}
+                <ChevronDown className="size-3" />
+              </button>
+              {outletMenuOpen && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-line bg-[#fbf6ef] p-1 shadow-[0_10px_24px_-8px_rgba(0,0,0,0.4)]">
+                  {availableOutlets.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => {
+                        onSelectOutlet(name);
+                        setOutletMenuOpen(false);
+                      }}
+                      className={`block w-full text-left px-3 py-1.5 text-xs font-medium text-maroon-deep hover:bg-gold/10 first:rounded-t-lg last:rounded-b-lg ${
+                        name === currentOutletName ? 'bg-gold/10 text-maroon' : ''
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -288,10 +322,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         <div className="gr-hairline mb-4" />
         <div className="flex items-center gap-3 rounded-lg border border-line/60 bg-maroon/30 p-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/60 text-[11px] font-semibold text-gold-soft">
-            {initials(settings.outletName || 'Admin')}
+            {initials(currentOutletName || 'Admin')}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-cream">{settings.outletName || 'HeadQuarters'}</p>
+            <p className="truncate text-sm font-medium text-cream">{currentOutletName || 'HeadQuarters'}</p>
             <p className="truncate text-[11px] text-cream/40">Pentadbir</p>
           </div>
         </div>
@@ -329,7 +363,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-3.5 w-auto" />
             </div>
             <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/50 text-[11px] font-semibold text-gold-soft">
-              {initials(settings.outletName || 'Admin')}
+              {initials(currentOutletName || 'Admin')}
             </div>
           </div>
         </header>

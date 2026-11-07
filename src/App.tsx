@@ -1,27 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  GoldPriceItem, 
-  GoldPurity, 
-  PromoItem, 
-  PriceHistoryEntry, 
-  ShopSettings, 
-  QuotationResult 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  GoldPriceItem,
+  GoldPurity,
+  PromoItem,
+  PriceHistoryEntry,
+  ShopSettings,
+  QuotationResult,
+  OutletConfig,
 } from './types/gold';
-import { 
-  loadPrices, 
-  savePrices, 
-  loadPromos, 
-  savePromos, 
-  loadSettings, 
-  saveSettings, 
-  loadHistory, 
+import {
+  loadPrices,
+  savePrices,
+  loadPromos,
+  savePromos,
+  loadSettings,
+  saveSettings,
+  loadHistory,
   saveHistory,
   subscribeToSync,
   DEFAULT_PRICES,
   DEFAULT_PROMOS,
   DEFAULT_SETTINGS,
-  DEFAULT_HISTORY
+  DEFAULT_HISTORY,
+  DEFAULT_OUTLET,
+  loadCurrentOutletName,
+  saveCurrentOutletName,
+  getOutlet,
+  upsertOutlet,
+  listOutletNames,
 } from './utils/storage';
+import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { Header } from './components/Header';
 import { GoldPriceBoard } from './components/GoldPriceBoard';
 import { PromoCarousel } from './components/PromoCarousel';
@@ -42,8 +50,13 @@ import {
 import { Sparkles, Calculator } from 'lucide-react';
 
 export default function App() {
-  // Central application state
-  const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(loadPrices);
+  // Outlet-scoped state
+  const [currentOutletName, setCurrentOutletName] = useState<string>(
+    loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName
+  );
+  const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(
+    loadPrices
+  );
   const [promos, setPromos] = useState<PromoItem[]>(loadPromos);
   const [settings, setSettings] = useState<ShopSettings>(loadSettings);
   const [history, setHistory] = useState<PriceHistoryEntry[]>(loadHistory);
@@ -80,6 +93,11 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  // Realtime for prices/promos:
+  // - Local multi-tab: BroadcastChannel (already in use)
+  // - Kios multi-device: Supabase Realtime broadcast (if VITE_SUPABASE_URL is set)
+  useSupabaseRealtime(prices, promos);
+
   // Sync page state with browser hash (#/kalkulator)
   useEffect(() => {
     const handleHashChange = () => setPage(getPageFromHash());
@@ -92,6 +110,20 @@ export default function App() {
     setPage(nextPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Switches the active outlet and reloads outlet-scoped data
+  const selectOutlet = useCallback(
+    (outletName: string) => {
+      if (outletName === currentOutletName) return;
+      setCurrentOutletName(outletName);
+      saveCurrentOutletName(outletName);
+      setPrices(loadPrices());
+      setPromos(loadPromos());
+      setSettings(loadSettings());
+      setHistory(loadHistory());
+    },
+    [currentOutletName]
+  );
 
   // Update Prices Handler
   const handleUpdatePrices = (
@@ -150,14 +182,19 @@ export default function App() {
 
   // Reset to Defaults Handler
   const handleResetDefaults = () => {
+    const outletName = currentOutletName;
+    upsertOutlet({
+      outletName,
+      prices: DEFAULT_PRICES,
+      promos: DEFAULT_PROMOS,
+      settings: DEFAULT_SETTINGS,
+      history: DEFAULT_HISTORY,
+      updatedAt: new Date().toISOString(),
+    });
     setPrices(DEFAULT_PRICES);
-    savePrices(DEFAULT_PRICES);
     setPromos(DEFAULT_PROMOS);
-    savePromos(DEFAULT_PROMOS);
     setSettings(DEFAULT_SETTINGS);
-    saveSettings(DEFAULT_SETTINGS);
     setHistory(DEFAULT_HISTORY);
-    saveHistory(DEFAULT_HISTORY);
   };
 
   // Login Handler (code-only, outlet or admin)
@@ -173,13 +210,33 @@ export default function App() {
       saveSession(nextSession);
       setSession(nextSession);
 
-      // Keep the header outlet label in sync with the logged-in outlet.
-      const nextSettings = {
-        ...loadSettings(),
-        outletName: nextSession.outletName,
-      };
-      setSettings(nextSettings);
-      saveSettings(nextSettings);
+      // Determine which outlet this session belongs to.
+      const outletName =
+        nextSession.outletName && nextSession.outletName.trim().length > 0
+          ? nextSession.outletName
+          : DEFAULT_OUTLET.outletName;
+
+      // If the outlet does not exist yet, seed it from defaults.
+      if (!getOutlet(outletName)) {
+        upsertOutlet({
+          outletName,
+          prices: DEFAULT_PRICES,
+          promos: DEFAULT_PROMOS,
+          settings: {
+            ...DEFAULT_SETTINGS,
+            outletName,
+          },
+          history: DEFAULT_HISTORY,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      setCurrentOutletName(outletName);
+      saveCurrentOutletName(outletName);
+      setPrices(loadPrices());
+      setPromos(loadPromos());
+      setSettings(loadSettings());
+      setHistory(loadHistory());
     } catch (error) {
       setLoginError(
         error instanceof Error
@@ -200,13 +257,13 @@ export default function App() {
     setPage('home');
     window.location.hash = '/';
 
-    // Outlet name returns to the default until the next login.
-    const resetSettings = {
-      ...loadSettings(),
-      outletName: DEFAULT_SETTINGS.outletName,
-    };
-    setSettings(resetSettings);
-    saveSettings(resetSettings);
+    // Return to the default outlet until the next login.
+    setCurrentOutletName(DEFAULT_OUTLET.outletName);
+    saveCurrentOutletName(DEFAULT_OUTLET.outletName);
+    setPrices(loadPrices());
+    setPromos(loadPromos());
+    setSettings(loadSettings());
+    setHistory(loadHistory());
   };
 
   // Re-validate the stored session (and its role) against Supabase on boot.
@@ -231,12 +288,28 @@ export default function App() {
         saveSession(nextSession);
         setSession(nextSession);
 
-        const nextSettings = {
-          ...loadSettings(),
-          outletName: nextSession.outletName,
-        };
-        setSettings(nextSettings);
-        saveSettings(nextSettings);
+        // Switch to the outlet associated with this session.
+        const outletName =
+          nextSession.outletName && nextSession.outletName.trim().length > 0
+            ? nextSession.outletName
+            : DEFAULT_OUTLET.outletName;
+
+        // Seed if missing.
+        if (!getOutlet(outletName)) {
+          upsertOutlet({
+            outletName,
+            prices: DEFAULT_PRICES,
+            promos: DEFAULT_PROMOS,
+            settings: {
+              ...DEFAULT_SETTINGS,
+              outletName,
+            },
+            history: DEFAULT_HISTORY,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        selectOutlet(outletName);
       }
     });
 
@@ -265,6 +338,9 @@ export default function App() {
         <AdminModal
           isOpen
           onClose={handleLogout}
+          currentOutletName={currentOutletName}
+          onSelectOutlet={selectOutlet}
+          availableOutlets={listOutletNames()}
           prices={prices}
           onUpdatePrices={handleUpdatePrices}
           promos={promos}
@@ -281,7 +357,6 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen w-full flex-col justify-between font-sans text-maroon-deep selection:bg-gold/35 selection:text-maroon-deep">
-      
       {/* 1. TOP HEADER BAR */}
       <Header
         settings={settings}
@@ -305,79 +380,73 @@ export default function App() {
       ) : (
         /* Main price board page */
         <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:lg:flex">
-        
-        {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
-            In portrait these become direct grid items so the poster can sit
-            between them, while landscape keeps the original side-by-side layout.
-            In landscape it flexes to fill all remaining width, so the poster
-            keeps its fixed 3:4 size. */}
-        <div className="contents landscape:lg:min-w-0 landscape:lg:flex-1 landscape:lg:flex landscape:lg:flex-col landscape:lg:gap-4 landscape:lg:justify-between">
-          
-          {/* Section: Live Gold Price Board (999, 916, 375) */}
-          <div className="order-1">
-            <GoldPriceBoard
-              prices={prices}
-              selectedPurity={selectedPurity}
-              onSelectPurity={setSelectedPurity}
-              onOpenCalculator={() => navigateTo('calculator')}
-            />
-          </div>
+          {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
+              In portrait these become direct grid items so the poster can sit
+              between them, while landscape keeps the original side-by-side layout.
+              In landscape it flexes to fill all remaining width, so the poster
+              keeps its fixed 3:4 size. */}
+          <div className="contents landscape:lg:min-w-0 landscape:lg:flex-1 landscape:lg:flex landscape:lg:flex-col landscape:lg:gap-4 landscape:lg:justify-between">
+            {/* Section: Live Gold Price Board (999, 916, 375) */}
+            <div className="order-1">
+              <GoldPriceBoard
+                prices={prices}
+                selectedPurity={selectedPurity}
+                onSelectPurity={setSelectedPurity}
+                onOpenCalculator={() => navigateTo('calculator')}
+              />
+            </div>
 
-          {/* Banner image: sits between the price board and calculator launcher.
-              Ratio 3:1 (e.g. 1800 × 600 px). Replace /images/banner-promosi.svg
-              with the permanent artwork, or point src to a .jpg/.png file. */}
-          <div className="order-3 w-full overflow-hidden rounded-2xl border border-line/15 bg-[#2a0404] shadow-[0_16px_36px_-26px_rgba(59,7,7,0.45)]">
-            <img
-              src="/images/banner-promosi.svg"
-              alt="Banner promosi kedai emas"
-              className="block w-full aspect-[3/1] object-cover object-center"
-              loading="lazy"
-            />
-          </div>
+            {/* Banner image: sits between the price board and calculator launcher.
+                Ratio 3:1 (e.g. 1800 × 600 px). Replace /images/banner-promosi.svg
+                with the permanent artwork, or point src to a .jpg/.png file. */}
+            <div className="order-3 w-full overflow-hidden rounded-2xl border border-line/15 bg-[#2a0404] shadow-[0_16px_36px_-26px_rgba(59,7,7,0.45)]">
+              <img
+                src="/images/banner-promosi.svg"
+                alt="Banner promosi kedai emas"
+                className="block w-full aspect-[3/1] object-cover object-center"
+                loading="lazy"
+              />
+            </div>
 
-          {/* Compact launcher to the dedicated calculator page */}
-          <button
-            type="button"
-            onClick={() => navigateTo('calculator')}
-            className="order-4 w-full flex items-center justify-between gap-4 rounded-2xl bg-gold px-4 py-3.5 text-left text-maroon-deep border border-gold-deep/45 shadow-[0_16px_36px_-26px_rgba(212,161,58,0.75)] transition hover:bg-gold-soft active:scale-[0.99]"
-          >
-            <span className="flex items-center gap-3">
-              <span className="grid size-10 place-items-center rounded-xl bg-maroon-deep/10 border border-maroon-deep/20">
-                <Calculator size={20} />
-              </span>
-              <span>
-                <span className="block font-serif text-sm font-bold tracking-wide sm:text-base">
-                  Kalkulator Jualan
+            {/* Compact launcher to the dedicated calculator page */}
+            <button
+              type="button"
+              onClick={() => navigateTo('calculator')}
+              className="order-4 w-full flex items-center justify-between gap-4 rounded-2xl bg-gold px-4 py-3.5 text-left text-maroon-deep border border-gold-deep/45 shadow-[0_16px_36px_-26px_rgba(212,161,58,0.75)] transition hover:bg-gold-soft active:scale-[0.99]"
+            >
+              <span className="flex items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-xl bg-maroon-deep/10 border border-maroon-deep/20">
+                  <Calculator size={20} />
                 </span>
-                <span className="block text-[11px] text-maroon-deep/70">
-                  Kira harga jual, upah tukang & trade-in emas lama
+                <span>
+                  <span className="block font-serif text-sm font-bold tracking-wide sm:text-base">
+                    Kalkulator Jualan
+                  </span>
+                  <span className="block text-[11px] text-maroon-deep/70">
+                    Kira harga jual, upah tukang & trade-in emas lama
+                  </span>
                 </span>
               </span>
-            </span>
-            <span className="shrink-0 rounded-lg bg-maroon-deep px-3 py-1.5 text-[11px] font-bold text-gold">
-              Buka
-            </span>
-          </button>
-
-        </div>
-
-        {/* RIGHT COLUMN: Promotional Posters Carousel & Highlights.
-            Portrait: appears between the price board and the calculator,
-            stretched to the full app width. Landscape: fixed 430px poster on
-            the right, aligned with the header's logout button. */}
-        <div className="order-2 flex w-full flex-col items-center justify-between gap-3 landscape:order-4 landscape:lg:w-[430px] landscape:lg:shrink-0 landscape:lg:items-end">
-          
-          {/* Promo Posters Carousel (3:4 single / 3:2 dual in tablet portrait) */}
-          <div className="w-full flex-1 flex items-center justify-center landscape:lg:justify-end">
-            <PromoCarousel
-              promos={promos}
-              shopName={settings.shopName}
-              shopPhone={settings.phone}
-            />
+              <span className="shrink-0 rounded-lg bg-maroon-deep px-3 py-1.5 text-[11px] font-bold text-gold">
+                Buka
+              </span>
+            </button>
           </div>
 
-        </div>
-
+          {/* RIGHT COLUMN: Promotional Posters Carousel & Highlights.
+              Portrait: appears between the price board and the calculator,
+              stretched to the full app width. Landscape: fixed 430px poster on
+              the right, aligned with the header's logout button. */}
+          <div className="order-2 flex w-full flex-col items-center justify-between gap-3 landscape:order-4 landscape:lg:w-[430px] landscape:lg:shrink-0 landscape:lg:items-end">
+            {/* Promo Posters Carousel (3:4 single / 3:2 dual in tablet portrait) */}
+            <div className="w-full flex-1 flex items-center justify-center landscape:lg:justify-end">
+              <PromoCarousel
+                promos={promos}
+                shopName={settings.shopName}
+                shopPhone={settings.phone}
+              />
+            </div>
+          </div>
         </main>
       )}
 
@@ -429,7 +498,6 @@ export default function App() {
 
       {/* Offline Alert Indicator */}
       <OfflineIndicator />
-
     </div>
   );
 }

@@ -44,6 +44,15 @@ export interface ShopSettings {
   currency: string;
 }
 
+export interface OutletConfig {
+  outletName: string;
+  prices: Record<GoldPurity, GoldPriceItem>;
+  promos: PromoItem[];
+  settings: ShopSettings;
+  history: PriceHistoryEntry[];
+  updatedAt: string;
+}
+
 export interface CalculatorInput {
   purity: GoldPurity;
   weight: number;
