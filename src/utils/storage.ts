@@ -187,8 +187,7 @@ type BroadcastPromosPayload = {
 };
 
 export function subscribeToSupabasePrices(
-  onPrices: (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => void,
-  onPromos?: (promos: PromoItem[], outletName: string) => void
+  onPrices: (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => void
 ): RealtimePriceListener | null {
   if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
     return null;
@@ -200,25 +199,12 @@ export function subscribeToSupabasePrices(
     'broadcast',
     { event: 'prices-changed' },
     (payload) => {
-      const raw = payload.payload as BroadcastPricesPayload | null;
+      const raw = payload.payload as { outletName?: string; prices?: Record<GoldPurity, GoldPriceItem> } | null;
       if (raw?.prices && !Array.isArray(raw.prices)) {
         onPrices(raw.prices as Record<GoldPurity, GoldPriceItem>, raw.outletName ?? 'default');
       }
     }
   );
-
-  if (typeof onPromos === 'function') {
-    priceChannel.on(
-      'broadcast',
-      { event: 'promos-changed' },
-      (payload) => {
-        const raw = payload.payload as BroadcastPromosPayload | null;
-        if (Array.isArray(raw?.promos)) {
-          onPromos(raw.promos as PromoItem[], raw.outletName ?? 'default');
-        }
-      }
-    );
-  }
 
   void priceChannel.subscribe((status, error) => {
     if (error) {
@@ -256,6 +242,17 @@ export function broadcastPrices(
     return;
   }
 
+  // Upsert prices to the kiosk_prices table per outlet
+  const priceData = Object.entries(prices).map(([purity, price]) => ({
+    outlet_name: outletName ?? 'default',
+    purity,
+    sell_price: price.sellPrice,
+    buy_price: price.buyPrice
+  }));
+
+  void supabase.from('kiosk_prices').upsert(priceData, { onConflict: 'outlet_name, purity' });
+
+  // Broadcast to all tabs so they reload from DB immediately
   const channel = supabase.channel('gold_prices');
 
   void channel.send({

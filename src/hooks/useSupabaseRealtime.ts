@@ -12,18 +12,14 @@ import {
 } from '../utils/storage';
 
 export function useSupabaseRealtime(
-  prices: Record<GoldPurity, GoldPriceItem>,
-  promos: PromoItem[]
+  prices: Record<GoldPurity, GoldPriceItem>
 ): void {
   const savedCallbackRef = useRef<RealtimePriceListener | null>(null);
 
   useEffect(() => {
     const listener = subscribeToSupabasePrices(
-      (nextPrices) => {
-        savePrices(nextPrices);
-      },
-      (nextPromos) => {
-        savePromos(nextPromos);
+      (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => {
+        savePrices(prices, outletName);
       }
     );
 

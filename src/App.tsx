@@ -96,7 +96,7 @@ export default function App() {
   // Realtime for prices/promos:
   // - Local multi-tab: BroadcastChannel (already in use)
   // - Kios multi-device: Supabase Realtime broadcast (if VITE_SUPABASE_URL is set)
-  useSupabaseRealtime(prices, promos);
+  useSupabaseRealtime(prices);
 
   // Sync page state with browser hash (#/kalkulator)
   useEffect(() => {

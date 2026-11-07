@@ -52,6 +52,52 @@ on conflict (code) do update
       is_active = true,
       updated_at = now();
 
+-- Gold prices per outlet, synced in real-time via Supabase Realtime.
+-- Each row represents one outlet's price for a specific purity.
+create table if not exists public.kiosk_prices (
+  outlet_name text not null,
+  purity text not null check (purity in ('999', '916', '375')),
+  sell_price numeric not null,
+  buy_price numeric not null,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  primary key (outlet_name, purity)
+);
+
+alter table public.kiosk_prices enable row level security;
+
+-- Allow anyone to read prices (kiosk display reads only)
+drop policy if exists "Kiosk prices are readable" on public.kiosk_prices;
+create policy "Kiosk prices are readable"
+  on public.kiosk_prices
+  for select
+  using (true);
+
+-- Allow admins to update prices (via the admin panel)
+drop policy if exists "Admins can update own outlet prices" on public.kiosk_prices;
+create policy "Admins can update own outlet prices"
+  on public.kiosk_prices
+  for update
+  using ((select role from public.kiosk_outlets where code = current_setting('app.outlet_code')) = 'admin');
+
+-- Seed initial prices per outlet (same as default localStorage values)
+drop policy if exists "Seed kiosk prices initial data" on public.kiosk_prices;
+create policy "Seed kiosk prices initial data"
+  on public.kiosk_prices
+  for insert
+  with check (true);
+insert into public.kiosk_prices (outlet_name, purity, sell_price, buy_price)
+select distinct outlet_name, purity, sell_price, buy_price
+from (values
+  ('HeadQuarters', '999', 468.0, 422.0),
+  ('HeadQuarters', '916', 428.0, 382.0),
+  ('HeadQuarters', '375', 188.0, 142.0),
+  ('Amanjaya Mall', '999', 468.0, 422.0),
+  ('Amanjaya Mall', '916', 428.0, 382.0),
+  ('Amanjaya Mall', '375', 188.0, 142.0)
+) as t(outlet_name, purity, sell_price, buy_price)
+on conflict (outlet_name, purity) do nothing;
+
 -- Already ran an older version of this file that used `public.outlets`?
 -- Rename it so it does not clash with the main site's own `outlets` table:
 --   alter table public.outlets rename to kiosk_outlets;
