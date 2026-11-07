@@ -1,0 +1,63 @@
+{
+  "name": "Gold Reserve - Kiosk Harga Emas & Promosi",
+  "description": "PWA sistem harga emas semasa (999, 916, 375), kalkulator jualan pantas, dan slaid promosi untuk kegunaan kaunter tablet.",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node \"node_modules/vite/bin/vite.js\" --port=3000 --host=0.0.0.0",
+    "build": "node \"node_modules/vite/bin/vite.js\" build",
+    "preview": "node \"node_modules/vite/bin/vite.js\" preview",
+    "clean": "rm -rf dist server.js",
+    "lint": "node \"node_modules/typescript/bin/tsc\" --noEmit"
+  },
+  "keywords": [
+    "gold-price",
+    "kiosk",
+    "pwa",
+    "retail",
+    "counter",
+    "capacitor",
+    "supabase"
+  ],
+  "author": {
+    "name": "Gold Reserve Team",
+    "email": "info@goldreserve.com.my"
+  },
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/gold-reserve/kiosk-harga-emas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gold-reserve/kiosk-harga-emas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gold-reserve/kiosk-harga-emas/issues"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^8.3.0",
+    "vite-plugin-pwa": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.4.21",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2"
+  }
+}
