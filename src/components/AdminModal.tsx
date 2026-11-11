@@ -310,7 +310,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-4 w-auto max-w-full" />
             {/* Outlet name tied to the login (from kiosk_outlets) — stays fixed
                 even when another outlet is selected for price editing. */}
-            <p className="truncate text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40">
+            <p className="truncate text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40 mt-1.5">
               {sessionOutletName || 'Admin'}
             </p>
           </div>
@@ -383,7 +383,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <Menu className="size-4" />
               </button>
               <img src="/SVG/favicon.svg" alt="" className="size-8 shrink-0 rounded-lg" />
-              <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-3.5 w-auto" />
+              <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-4 w-auto" />
             </div>
             <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/50 text-[11px] font-semibold text-gold-soft">
               {initials(sessionOutletName || 'Admin')}
