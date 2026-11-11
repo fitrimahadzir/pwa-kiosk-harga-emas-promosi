@@ -41,16 +41,20 @@ create policy "Kiosk outlet codes are readable for login"
 -- Replace these seed rows with your real outlets.
 -- Add more admins by inserting another row with role = 'admin', for example:
 --   insert into public.kiosk_outlets (code, name, role)
---   values ('HQ2', 'HeadQuarters', 'admin');
+--   values ('HQ2', 'HQ Warehouse', 'admin');
 insert into public.kiosk_outlets (code, name, role)
 values
   ('AMANJAYA', 'Amanjaya Mall', 'outlet'),
-  ('HQ', 'HeadQuarters', 'admin')
+  ('HQ', 'HQ Warehouse', 'admin')
 on conflict (code) do update
   set name = excluded.name,
       role = excluded.role,
       is_active = true,
       updated_at = now();
+
+-- Previously seeded 'HeadQuarters'? Rename the old rows to 'HQ Warehouse':
+--   update public.kiosk_outlets set name = 'HQ Warehouse' where name = 'HeadQuarters';
+--   update public.kiosk_prices set outlet_name = 'HQ Warehouse' where outlet_name = 'HeadQuarters';
 
 -- Gold prices per outlet, synced in real-time via Supabase Realtime.
 -- Each row represents one outlet's price for a specific purity.
@@ -89,9 +93,9 @@ create policy "Seed kiosk prices initial data"
 insert into public.kiosk_prices (outlet_name, purity, sell_price, buy_price)
 select distinct outlet_name, purity, sell_price, buy_price
 from (values
-  ('HeadQuarters', '999', 468.0, 422.0),
-  ('HeadQuarters', '916', 428.0, 382.0),
-  ('HeadQuarters', '375', 188.0, 142.0),
+  ('HQ Warehouse', '999', 468.0, 422.0),
+  ('HQ Warehouse', '916', 428.0, 382.0),
+  ('HQ Warehouse', '375', 188.0, 142.0),
   ('Amanjaya Mall', '999', 468.0, 422.0),
   ('Amanjaya Mall', '916', 428.0, 382.0),
   ('Amanjaya Mall', '375', 188.0, 142.0)

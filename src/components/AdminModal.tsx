@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   Coins,
@@ -17,6 +17,8 @@ import {
   Menu,
   LayoutDashboard,
   ChevronDown,
+  MapPin,
+  PencilLine,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -32,8 +34,11 @@ interface AdminModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentOutletName: string;
+  /** Outlet name tied to the login session (from `kiosk_outlets`) — the admin identity. */
+  sessionOutletName: string;
   onSelectOutlet: (outletName: string) => void;
   availableOutlets: string[];
+  outletPrices: Record<string, Record<GoldPurity, GoldPriceItem>>;
   prices: Record<GoldPurity, GoldPriceItem>;
   onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => void;
   promos: PromoItem[];
@@ -57,7 +62,8 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
   prices: {
     kicker: 'Pentadbir',
     title: 'Harga Emas',
-    description: 'Pelarasan harga jual dan beli semula disegerakkan ke tablet kaunter.',
+    description:
+      'Pilih outlet, kemudian laraskan harga jual dan beli semula — disegerakkan ke tablet kaunter outlet tersebut.',
   },
   promos: {
     kicker: 'Kaunter',
@@ -128,8 +134,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
   currentOutletName,
+  sessionOutletName,
   onSelectOutlet,
   availableOutlets,
+  outletPrices,
   prices,
   onUpdatePrices,
   promos,
@@ -142,7 +150,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>('prices');
   const [navOpen, setNavOpen] = useState(false);
 
-  const [outletMenuOpen, setOutletMenuOpen] = useState(false);
   const [draftPrices, setDraftPrices] = useState<Record<GoldPurity, GoldPriceItem>>(prices);
   const [priceNote, setPriceNote] = useState<string>('Pelarasan harga semasa');
   const [priceSuccessMsg, setPriceSuccessMsg] = useState<string>('');
@@ -162,6 +169,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [draftSettings, setDraftSettings] = useState<ShopSettings>(settings);
   const [settingsSuccess, setSettingsSuccess] = useState<string>('');
 
+  // Keep drafts in sync with the selected outlet's stored data. Without this,
+  // switching outlets would keep editing the previous outlet's prices/promos.
+  useEffect(() => {
+    setDraftPrices(prices);
+  }, [prices]);
+  useEffect(() => {
+    setDraftPromos(promos);
+  }, [promos]);
+  useEffect(() => {
+    setDraftSettings(settings);
+  }, [settings]);
+
   const todayLabel = useMemo(
     () =>
       new Date().toLocaleDateString('ms-MY', {
@@ -178,9 +197,37 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Outlet list used by the picker (fallback to the current outlet only)
+  const outletOptions =
+    availableOutlets.length > 0 ? availableOutlets : [currentOutletName || 'HQ Warehouse'];
+
+  // True while the admin has unsaved price edits for the current outlet
+  const hasUnsavedPriceEdits = (['999', '916', '375'] as GoldPurity[]).some(
+    (purity) =>
+      draftPrices[purity].sellPrice !== prices[purity].sellPrice ||
+      draftPrices[purity].buyPrice !== prices[purity].buyPrice,
+  );
+
+  // Switch the outlet being edited (with a guard for unsaved price edits)
+  const handleSelectOutlet = (name: string) => {
+    if (name === currentOutletName) return;
+    if (
+      hasUnsavedPriceEdits &&
+      !window.confirm(
+        'Ada perubahan harga yang belum disimpan. Tukar outlet dan abaikan perubahan ini?',
+      )
+    ) {
+      return;
+    }
+    setPriceSuccessMsg('');
+    onSelectOutlet(name);
+  };
+
   const handleSavePrices = () => {
     onUpdatePrices(draftPrices, priceNote);
-    setPriceSuccessMsg('Harga emas berjaya dikemaskini dan disegerakkan ke tablet.');
+    setPriceSuccessMsg(
+      `Harga ${currentOutletName || 'outlet ini'} berjaya dikemaskini dan disegerakkan.`,
+    );
     setTimeout(() => setPriceSuccessMsg(''), 3000);
   };
 
@@ -261,35 +308,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <img src="/SVG/favicon.svg" alt="" aria-hidden="true" className="size-10 shrink-0 rounded-lg" />
           <div className="min-w-0">
             <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-4 w-auto max-w-full" />
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setOutletMenuOpen((open) => !open)}
-                className="inline-flex items-center gap-1 text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40 hover:text-cream"
-              >
-                {currentOutletName || 'HeadQuarters'}
-                <ChevronDown className="size-3" />
-              </button>
-              {outletMenuOpen && (
-                <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-line bg-[#fbf6ef] p-1 shadow-[0_10px_24px_-8px_rgba(0,0,0,0.4)]">
-                  {availableOutlets.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => {
-                        onSelectOutlet(name);
-                        setOutletMenuOpen(false);
-                      }}
-                      className={`block w-full text-left px-3 py-1.5 text-xs font-medium text-maroon-deep hover:bg-gold/10 first:rounded-t-lg last:rounded-b-lg ${
-                        name === currentOutletName ? 'bg-gold/10 text-maroon' : ''
-                      }`}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Outlet name tied to the login (from kiosk_outlets) — stays fixed
+                even when another outlet is selected for price editing. */}
+            <p className="truncate text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40">
+              {sessionOutletName || 'Admin'}
+            </p>
           </div>
         </div>
       </div>
@@ -322,10 +345,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         <div className="gr-hairline mb-4" />
         <div className="flex items-center gap-3 rounded-lg border border-line/60 bg-maroon/30 p-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/60 text-[11px] font-semibold text-gold-soft">
-            {initials(currentOutletName || 'Admin')}
+            {initials(sessionOutletName || 'Admin')}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-cream">{currentOutletName || 'HeadQuarters'}</p>
+            <p className="truncate text-sm font-medium text-cream">{sessionOutletName || 'Admin'}</p>
             <p className="truncate text-[11px] text-cream/40">Pentadbir</p>
           </div>
         </div>
@@ -363,7 +386,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-3.5 w-auto" />
             </div>
             <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/50 text-[11px] font-semibold text-gold-soft">
-              {initials(currentOutletName || 'Admin')}
+              {initials(sessionOutletName || 'Admin')}
             </div>
           </div>
         </header>
@@ -404,13 +427,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               icon={LayoutDashboard}
               label="Emas 999"
               value={formatMYR(prices['999'].sellPrice)}
-              hint={`Beli semula ${formatMYR(prices['999'].buyPrice)}`}
+              hint={`Beli semula ${formatMYR(prices['999'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
             />
             <StatCard
               icon={Coins}
               label="Emas 916"
               value={formatMYR(prices['916'].sellPrice)}
-              hint={`Beli semula ${formatMYR(prices['916'].buyPrice)}`}
+              hint={`Beli semula ${formatMYR(prices['916'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
               accent="cream"
             />
             <StatCard
@@ -430,81 +453,175 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
 
           {activeTab === 'prices' && (
-            <section className="gr-card-light mt-6 overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/15 p-5">
-                <div>
-                  <p className="gr-kicker text-maroon">Kemas kini harga</p>
-                  <p className="mt-1.5 font-heading text-xl text-maroon-deep">Jual dan beli semula</p>
-                  <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
+            <>
+              {/* STEP 1: choose which outlet/kiosk to update */}
+              <section className="gr-card-light mt-6 p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="gr-kicker text-maroon">Langkah 1</p>
+                    <p className="mt-1.5 font-heading text-xl text-maroon-deep">Pilih outlet / kiosk</p>
+                    <p className="mt-1 text-sm text-maroon-deep/55">
+                      Setiap outlet menyimpan harga jual dan beli semula yang berasingan.
+                    </p>
+                  </div>
+                  <div className="w-full sm:w-80">
+                    <label className={labelClass}>Outlet untuk dikemaskini</label>
+                    <OutletSelect
+                      outlets={outletOptions}
+                      selected={currentOutletName}
+                      onSelect={handleSelectOutlet}
+                    />
+                  </div>
                 </div>
-                {priceSuccessMsg && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/30 bg-[#eef8f1] px-3 py-1.5 text-xs font-semibold text-[#3f835b]">
-                    <Check className="size-3.5" />
-                    {priceSuccessMsg}
-                  </span>
-                )}
-              </div>
+              </section>
 
-              <div className="space-y-5 p-5">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                  {(['999', '916', '375'] as GoldPurity[]).map((purity) => {
-                    const item = draftPrices[purity];
-                    return (
-                      <article key={purity} className="rounded-xl border border-line/15 bg-[#fbf6ef] p-4">
-                        <div className="flex items-center justify-between border-b border-line/15 pb-3">
-                          <div>
-                            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-maroon-deep/45">
-                              {item.karat}
-                            </p>
-                            <p className="mt-1 font-heading text-xl leading-none text-maroon-deep">
-                              Emas {purity}
-                            </p>
+              {/* STEP 2: edit the selected outlet's prices */}
+              <section className="gr-card-light mt-4 overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/15 p-5">
+                  <div className="min-w-0">
+                    <p className="gr-kicker text-maroon">Langkah 2</p>
+                    <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                      Harga emas {currentOutletName || 'outlet ini'}
+                    </p>
+                    <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
+                  </div>
+                  {priceSuccessMsg && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/30 bg-[#eef8f1] px-3 py-1.5 text-xs font-semibold text-[#3f835b]">
+                      <Check className="size-3.5" />
+                      {priceSuccessMsg}
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-5 p-5">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {(['999', '916', '375'] as GoldPurity[]).map((purity) => {
+                      const item = draftPrices[purity];
+                      return (
+                        <article key={purity} className="rounded-xl border border-line/15 bg-[#fbf6ef] p-4">
+                          <div className="flex items-center justify-between border-b border-line/15 pb-3">
+                            <div>
+                              <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-maroon-deep/45">
+                                {item.karat}
+                              </p>
+                              <p className="mt-1 font-heading text-xl leading-none text-maroon-deep">
+                                Emas {purity}
+                              </p>
+                            </div>
+                            <span className="rounded-md border border-gold-deep/20 bg-gold/10 px-2 py-1 text-[10px] font-semibold text-maroon">
+                              {item.fineness}
+                            </span>
                           </div>
-                          <span className="rounded-md border border-gold-deep/20 bg-gold/10 px-2 py-1 text-[10px] font-semibold text-maroon">
-                            {item.fineness}
-                          </span>
-                        </div>
 
-                        <PriceField
-                          label="Harga jual"
-                          value={item.sellPrice}
-                          onChange={(value) =>
-                            setDraftPrices({
-                              ...draftPrices,
-                              [purity]: { ...item, sellPrice: value },
-                            })
-                          }
-                        />
-                        <PriceField
-                          label="Beli semula"
-                          value={item.buyPrice}
-                          onChange={(value) =>
-                            setDraftPrices({
-                              ...draftPrices,
-                              [purity]: { ...item, buyPrice: value },
-                            })
-                          }
-                        />
-                      </article>
+                          <PriceField
+                            label="Harga jual"
+                            value={item.sellPrice}
+                            onChange={(value) =>
+                              setDraftPrices({
+                                ...draftPrices,
+                                [purity]: { ...item, sellPrice: value },
+                              })
+                            }
+                          />
+                          <PriceField
+                            label="Beli semula"
+                            value={item.buyPrice}
+                            onChange={(value) =>
+                              setDraftPrices({
+                                ...draftPrices,
+                                [purity]: { ...item, buyPrice: value },
+                              })
+                            }
+                          />
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Catatan perubahan</label>
+                    <input
+                      type="text"
+                      value={priceNote}
+                      onChange={(e) => setPriceNote(e.target.value)}
+                      placeholder="cth: Pelarasan harga petang mengikut pasaran"
+                      className={fieldClass}
+                    />
+                    <p className="mt-1.5 text-[11px] text-maroon-deep/45">
+                      Catatan ini disimpan dalam log sejarah.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Overview: current prices of every outlet */}
+              <section className="gr-card-light mt-4 overflow-hidden">
+                <div className="border-b border-line/15 p-5">
+                  <p className="gr-kicker text-maroon">Semua outlet</p>
+                  <p className="mt-1.5 font-heading text-xl text-maroon-deep">Perbandingan harga jual</p>
+                  <p className="mt-1 text-sm text-maroon-deep/55">
+                    Harga jual semasa setiap outlet/kiosk. Pilih mana-mana baris untuk mula mengemaskini.
+                  </p>
+                </div>
+                <div className="divide-y divide-line/10">
+                  {outletOptions.map((name) => {
+                    const outletPriceMap = outletPrices[name];
+                    const isActive = name === currentOutletName;
+                    return (
+                      <div
+                        key={name}
+                        className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <MapPin
+                              className={`size-3.5 shrink-0 ${
+                                isActive ? 'text-gold-deep' : 'text-maroon-deep/35'
+                              }`}
+                            />
+                            <p className="truncate font-heading text-lg leading-none text-maroon-deep">
+                              {name}
+                            </p>
+                            {isActive && (
+                              <span className="rounded-full border border-gold-deep/25 bg-gold/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
+                                Dipilih
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {(['999', '916', '375'] as GoldPurity[]).map((purity) => (
+                              <span
+                                key={purity}
+                                className="rounded-md border border-line/15 bg-[#fbf6ef] px-2 py-1 text-[10px] font-semibold tabular-nums text-maroon-deep/70"
+                              >
+                                {purity} · {formatMYR(outletPriceMap?.[purity]?.sellPrice ?? 0)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectOutlet(name)}
+                          disabled={isActive}
+                          className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                            isActive
+                              ? 'cursor-default bg-gold/15 text-maroon'
+                              : 'border border-line/25 bg-[#fffdf9] text-maroon hover:border-gold-deep/40 hover:bg-gold/10'
+                          }`}
+                        >
+                          {isActive ? (
+                            <Check className="size-3.5" />
+                          ) : (
+                            <PencilLine className="size-3.5 text-gold-deep" />
+                          )}
+                          {isActive ? 'Sedang diedit' : 'Ubah harga'}
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
-
-                <div>
-                  <label className={labelClass}>Catatan perubahan</label>
-                  <input
-                    type="text"
-                    value={priceNote}
-                    onChange={(e) => setPriceNote(e.target.value)}
-                    placeholder="cth: Pelarasan harga petang mengikut pasaran"
-                    className={fieldClass}
-                  />
-                  <p className="mt-1.5 text-[11px] text-maroon-deep/45">
-                    Catatan ini disimpan dalam log sejarah.
-                  </p>
-                </div>
-              </div>
-            </section>
+              </section>
+            </>
           )}
 
           {activeTab === 'promos' && (
@@ -885,6 +1002,86 @@ function PriceField({
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
         className={`${fieldClass} font-semibold tabular-nums`}
       />
+    </div>
+  );
+}
+
+/**
+ * Dropdown to pick which outlet/kiosk the admin is updating prices for.
+ * Selecting an outlet calls `onSelect`, which reloads all outlet-scoped data.
+ */
+function OutletSelect({
+  outlets,
+  selected,
+  onSelect,
+}: {
+  outlets: string[];
+  selected: string;
+  onSelect: (name: string) => void;
+}) {
+  const [open, setOpen] = useState<boolean>(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`${fieldClass} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <MapPin className="size-4 shrink-0 text-gold-deep" />
+          <span className="truncate">{selected || 'Pilih outlet'}</span>
+        </span>
+        <ChevronDown
+          className={`size-4 shrink-0 text-maroon-deep/50 transition-transform ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Tutup senarai outlet"
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            role="listbox"
+            className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-line bg-[#fbf6ef] p-1 shadow-[0_18px_40px_-18px_rgba(59,7,7,0.55)]"
+          >
+            {outlets.map((name) => {
+              const isActive = name === selected;
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  onClick={() => {
+                    onSelect(name);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    isActive ? 'bg-gold/15 text-maroon' : 'text-maroon-deep hover:bg-gold/10'
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <MapPin
+                      className={`size-3.5 shrink-0 ${isActive ? 'text-gold-deep' : 'text-maroon-deep/40'}`}
+                    />
+                    <span className="truncate">{name}</span>
+                  </span>
+                  {isActive && <Check className="size-3.5 shrink-0 text-gold-deep" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

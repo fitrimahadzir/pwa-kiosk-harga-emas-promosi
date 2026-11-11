@@ -1,6 +1,7 @@
 import { GoldPriceItem, GoldPurity, PromoItem, PriceHistoryEntry, ShopSettings, OutletConfig } from '../types/gold';
 import { SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { LOCAL_DEMO_OUTLET_NAMES, OUTLET_RENAMES } from '../lib/auth';
 
 const PRICES_KEY = 'emaspos_gold_prices_v1';
 const PROMOS_KEY = 'emaspos_promos_v1';
@@ -280,7 +281,18 @@ export function loadOutlets(): Record<string, OutletConfig> {
     if (!saved) return {};
     const parsed = JSON.parse(saved);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return parsed as Record<string, OutletConfig>;
+    const outlets = parsed as Record<string, OutletConfig>;
+    // Rename legacy outlets (e.g. HeadQuarters -> HQ Warehouse) so previously
+    // stored data is carried over to the current outlet name.
+    for (const [legacyName, nextName] of Object.entries(OUTLET_RENAMES)) {
+      const legacy = outlets[legacyName];
+      if (!legacy) continue;
+      if (!outlets[nextName]) {
+        outlets[nextName] = { ...legacy, outletName: nextName };
+      }
+      delete outlets[legacyName];
+    }
+    return outlets;
   } catch {
     return {};
   }
@@ -295,7 +307,10 @@ export function saveOutlets(outlets: Record<string, OutletConfig>) {
 export function loadCurrentOutletName(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return localStorage.getItem(CURRENT_OUTLET_KEY);
+    const saved = localStorage.getItem(CURRENT_OUTLET_KEY);
+    if (!saved) return null;
+    // Follow outlet renames (e.g. HeadQuarters -> HQ Warehouse).
+    return OUTLET_RENAMES[saved] ?? saved;
   } catch {
     return null;
   }
@@ -333,18 +348,35 @@ export function loadPrices(): Record<GoldPurity, GoldPriceItem> {
   return DEFAULT_PRICES;
 }
 
-export function savePrices(prices: Record<GoldPurity, GoldPriceItem>) {
+/**
+ * Save prices for a specific outlet (defaults to the current one).
+ *
+ * `options.broadcast = false` is used when prices arrive from a Supabase
+ * realtime broadcast, so kiosks do not re-broadcast the same update back and
+ * ping-pong messages between devices forever.
+ */
+export function savePrices(
+  prices: Record<GoldPurity, GoldPriceItem>,
+  outletName?: string,
+  options?: { broadcast?: boolean }
+) {
   if (typeof window === 'undefined') return;
   const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
-  const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
+  const targetOutlet = outletName ?? currentOutlet;
+  const existing = getOutlet(targetOutlet) ?? DEFAULT_OUTLET;
   const updated: OutletConfig = {
     ...existing,
+    outletName: targetOutlet,
     prices,
     updatedAt: new Date().toISOString(),
   };
   upsertOutlet(updated);
-  notifySync('prices');
-  broadcastPrices(prices, undefined, currentOutlet);
+  if (targetOutlet === currentOutlet) {
+    notifySync('prices');
+  }
+  if (options?.broadcast !== false) {
+    broadcastPrices(prices, undefined, targetOutlet);
+  }
 }
 
 export function loadPromos(): PromoItem[] {
@@ -362,6 +394,7 @@ export function savePromos(promos: PromoItem[]) {
   const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
   const updated: OutletConfig = {
     ...existing,
+    outletName: currentOutlet,
     promos,
     updatedAt: new Date().toISOString(),
   };
@@ -385,6 +418,7 @@ export function saveSettings(settings: ShopSettings) {
   const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
   const updated: OutletConfig = {
     ...existing,
+    outletName: currentOutlet,
     settings,
     updatedAt: new Date().toISOString(),
   };
@@ -407,9 +441,125 @@ export function saveHistory(history: PriceHistoryEntry[]) {
   const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
   const updated: OutletConfig = {
     ...existing,
+    outletName: currentOutlet,
     history: history.slice(0, 50), // keep latest 50
     updatedAt: new Date().toISOString(),
   };
   upsertOutlet(updated);
   notifySync('history');
+}
+
+function isGoldPurity(value: string): value is GoldPurity {
+  return value === '999' || value === '916' || value === '375';
+}
+
+function cloneDefaultPrices(): Record<GoldPurity, GoldPriceItem> {
+  return {
+    '999': { ...DEFAULT_PRICES['999'] },
+    '916': { ...DEFAULT_PRICES['916'] },
+    '375': { ...DEFAULT_PRICES['375'] },
+  };
+}
+
+/**
+ * Create a local config for every outlet name that is not known yet.
+ * Prices are taken from `pricesByOutlet` when available (remote data),
+ * otherwise the default price list is used.
+ */
+function seedMissingOutlets(
+  names: string[],
+  pricesByOutlet: Map<string, Record<GoldPurity, GoldPriceItem>> = new Map()
+) {
+  const outlets = loadOutlets();
+  let seeded = false;
+  for (const name of names) {
+    if (!outlets[name]) {
+      outlets[name] = {
+        outletName: name,
+        prices: pricesByOutlet.get(name) ?? cloneDefaultPrices(),
+        promos: DEFAULT_PROMOS,
+        settings: { ...DEFAULT_SETTINGS, outletName: name },
+        history: [],
+        updatedAt: new Date().toISOString(),
+      };
+      seeded = true;
+    }
+  }
+  if (seeded) saveOutlets(outlets);
+}
+
+/**
+ * Pull the active outlet list (and their latest prices) from Supabase, then
+ * seed any outlet that is still missing locally.
+ *
+ * This lets the admin panel offer EVERY outlet when picking which outlet to
+ * update prices for — even outlets that have never logged in on this device.
+ * Returns the sorted outlet names known locally after seeding. When Supabase
+ * is not configured (or unreachable) it simply falls back to the local list.
+ */
+export async function syncRemoteOutlets(): Promise<string[]> {
+  if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
+    // Local demo mode: still make every demo outlet selectable in the admin
+    // panel so per-outlet pricing can be tried without a database.
+    seedMissingOutlets(LOCAL_DEMO_OUTLET_NAMES);
+    return listOutletNames();
+  }
+
+  const { data: outletRows, error: outletError } = await supabase
+    .from('kiosk_outlets')
+    .select('name')
+    .eq('is_active', true);
+
+  if (outletError || !Array.isArray(outletRows)) {
+    console.warn('[emaspos] Failed to load outlets from Supabase:', outletError?.message);
+    return listOutletNames();
+  }
+
+  const names = Array.from(
+    new Set(
+      outletRows
+        .map((row) => (row as { name?: string }).name)
+        .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+        .map((name) => name.trim()),
+    ),
+  );
+
+  if (names.length === 0) return listOutletNames();
+
+  // Latest prices per outlet — the kiosk_prices table is the source of truth.
+  const { data: priceRows } = await supabase
+    .from('kiosk_prices')
+    .select('outlet_name, purity, sell_price, buy_price');
+
+  const remotePrices = new Map<string, Record<GoldPurity, GoldPriceItem>>();
+  if (Array.isArray(priceRows)) {
+    for (const row of priceRows as Array<{
+      outlet_name?: string;
+      purity?: string;
+      sell_price?: number | string;
+      buy_price?: number | string;
+    }>) {
+      const outletName = typeof row.outlet_name === 'string' ? row.outlet_name : '';
+      const purity = typeof row.purity === 'string' ? row.purity : '';
+      if (!outletName || !isGoldPurity(purity)) continue;
+
+      const base = remotePrices.get(outletName) ?? cloneDefaultPrices();
+      const sellPrice = Number(row.sell_price);
+      const buyPrice = Number(row.buy_price);
+      remotePrices.set(outletName, {
+        ...base,
+        [purity]: {
+          ...base[purity],
+          sellPrice:
+            Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : base[purity].sellPrice,
+          buyPrice:
+            Number.isFinite(buyPrice) && buyPrice > 0 ? buyPrice : base[purity].buyPrice,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }
+  }
+
+  seedMissingOutlets(names, remotePrices);
+  return Object.keys(loadOutlets()).sort();
 }

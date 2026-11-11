@@ -23,11 +23,28 @@ const SESSION_KEY = 'emaspos_auth_session_v1';
  */
 const LOCAL_OUTLETS: Record<string, Omit<AuthSession, 'code'>> = {
   AMANJAYA: { outletName: 'Amanjaya Mall', role: 'outlet' },
-  HQ: { outletName: 'HeadQuarters', role: 'admin' },
-  HEADQUARTERS: { outletName: 'HeadQuarters', role: 'admin' },
+  HQ: { outletName: 'HQ Warehouse', role: 'admin' },
 };
 
 export const LOCAL_DEMO_CODES = Object.keys(LOCAL_OUTLETS);
+
+/**
+ * Outlets renamed over time: legacy name -> current name.
+ * Kept in sync with the `kiosk_outlets` table, so stored sessions and old
+ * localStorage data follow the latest outlet naming.
+ */
+export const OUTLET_RENAMES: Record<string, string> = {
+  HeadQuarters: 'HQ Warehouse',
+};
+
+/**
+ * Unique outlet names known in local demo mode (Supabase not configured).
+ * Used by the admin panel so per-outlet pricing can still be tried out
+ * without a database.
+ */
+export const LOCAL_DEMO_OUTLET_NAMES: string[] = Array.from(
+  new Set(Object.values(LOCAL_OUTLETS).map((outlet) => outlet.outletName)),
+);
 
 export function normalizeOutletCode(code: string): string {
   return code.trim().toUpperCase();
@@ -65,8 +82,8 @@ export async function loginWithOutletCode(rawCode: string): Promise<AuthSession>
 
     return {
       code: outlet.code,
-      // Admin branch always shows as HeadQuarters in the kiosk.
-      outletName: outlet.role === 'admin' ? 'HeadQuarters' : outlet.name,
+      // Use the outlet name straight from the database (e.g. 'HQ Warehouse')
+      outletName: outlet.name,
       role: outlet.role === 'admin' ? 'admin' : 'outlet',
     };
   }
@@ -109,8 +126,8 @@ export async function refreshSession(
 
   return {
     code: outlet.code,
-    // Admin branch always shows as HeadQuarters in the kiosk.
-    outletName: role === 'admin' ? 'HeadQuarters' : outlet.name,
+    // Use the outlet name straight from the database (e.g. 'HQ Warehouse')
+    outletName: outlet.name,
     role,
   };
 }
@@ -127,7 +144,8 @@ export function loadSession(): AuthSession | null {
 
     return {
       code: parsed.code,
-      outletName: parsed.outletName,
+      // Follow outlet renames (e.g. HeadQuarters -> HQ Warehouse).
+      outletName: OUTLET_RENAMES[parsed.outletName] ?? parsed.outletName,
       role: parsed.role === 'admin' ? 'admin' : 'outlet',
     };
   } catch {

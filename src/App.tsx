@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   GoldPriceItem,
   GoldPurity,
@@ -28,6 +28,7 @@ import {
   getOutlet,
   upsertOutlet,
   listOutletNames,
+  syncRemoteOutlets,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { Header } from './components/Header';
@@ -61,6 +62,11 @@ export default function App() {
   const [settings, setSettings] = useState<ShopSettings>(loadSettings);
   const [history, setHistory] = useState<PriceHistoryEntry[]>(loadHistory);
 
+  // All outlets the admin can switch between / update prices for
+  const [availableOutlets, setAvailableOutlets] = useState<string[]>(() =>
+    listOutletNames()
+  );
+
   // Active calculator purity selection
   const [selectedPurity, setSelectedPurity] = useState<GoldPurity>('916');
 
@@ -87,11 +93,46 @@ export default function App() {
     const unsubscribe = subscribeToSync((type) => {
       if (type === 'prices') setPrices(loadPrices());
       if (type === 'promos') setPromos(loadPromos());
-      if (type === 'settings') setSettings(loadSettings());
+      if (type === 'settings') {
+        setSettings(loadSettings());
+        setAvailableOutlets(listOutletNames());
+      }
       if (type === 'history') setHistory(loadHistory());
     });
     return unsubscribe;
   }, []);
+
+  // Keep the admin outlet picker in sync with Supabase, so every outlet can be
+  // selected when updating prices — even outlets that never logged in here.
+  useEffect(() => {
+    if (!session || session.role !== 'admin') return;
+
+    let cancelled = false;
+    syncRemoteOutlets()
+      .then((names) => {
+        if (!cancelled && names.length > 0) setAvailableOutlets(names);
+      })
+      .catch(() => {
+        // Offline or Supabase not configured — keep the local outlet list.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  // Per-outlet price snapshot for the admin "all outlets" overview table.
+  // Rebuilt whenever any outlet-scoped state changes (saves, outlet switches,
+  // realtime updates) so it always reflects what is stored.
+  const outletPrices = useMemo(() => {
+    const map: Record<string, Record<GoldPurity, GoldPriceItem>> = {};
+    for (const name of listOutletNames()) {
+      const outlet = getOutlet(name);
+      if (outlet) map[name] = outlet.prices;
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prices, promos, settings, history, availableOutlets, currentOutletName]);
 
   // Realtime for prices/promos:
   // - Local multi-tab: BroadcastChannel (already in use)
@@ -339,8 +380,10 @@ export default function App() {
           isOpen
           onClose={handleLogout}
           currentOutletName={currentOutletName}
+          sessionOutletName={session.outletName}
           onSelectOutlet={selectOutlet}
-          availableOutlets={listOutletNames()}
+          availableOutlets={availableOutlets}
+          outletPrices={outletPrices}
           prices={prices}
           onUpdatePrices={handleUpdatePrices}
           promos={promos}

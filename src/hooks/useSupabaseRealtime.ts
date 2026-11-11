@@ -19,7 +19,9 @@ export function useSupabaseRealtime(
   useEffect(() => {
     const listener = subscribeToSupabasePrices(
       (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => {
-        savePrices(prices, outletName);
+        // Save into the outlet the broadcast was for (not just the active one),
+        // without re-broadcasting so updates do not ping-pong between kiosks.
+        savePrices(prices, outletName, { broadcast: false });
       }
     );
 
