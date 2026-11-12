@@ -227,6 +227,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [promoUploadError, setPromoUploadError] = useState<string>('');
   const [promoSaving, setPromoSaving] = useState<boolean>(false);
   const [promoError, setPromoError] = useState<string>('');
+  const [promoSuccess, setPromoSuccess] = useState<string>('');
 
   const [draftSettings, setDraftSettings] = useState<ShopSettings>(settings);
   const [settingsSuccess, setSettingsSuccess] = useState<string>('');
@@ -354,31 +355,44 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handleCreatePromo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPromo.imageUrl || promoSaving) return;
-
+  /**
+   * Simpan satu poster ke server. Dipanggil terus selepas gambar dimuat naik
+   * supaya tiada langkah "simpan" berasingan yang mudah terlepas pandang.
+   */
+  const persistPromo = async (id: string, imageUrl: string) => {
     const created: PromoItem = {
-      id: `promo-${Date.now()}`,
+      id,
       title: `Poster Promosi ${draftPromos.length + 1}`,
       subtitle: '',
       badge: '',
-      imageUrl: newPromo.imageUrl,
+      imageUrl,
       validUntil: '',
       terms: '',
       isActive: true,
     };
 
-    const updated = [created, ...draftPromos];
+    const updated = [created, ...draftPromos.filter((promo) => promo.id !== id)];
+
+    await onUpdatePromos(updated);
+    setDraftPromos(updated);
+    setShowAddPromo(false);
+    setNewPromo({ imageUrl: '', isActive: true });
+    setPromoUploadError('');
+    setPromoError('');
+    setPromoSuccess('Poster berjaya disimpan ke server dan akan muncul di outlet.');
+    setTimeout(() => setPromoSuccess(''), 5000);
+  };
+
+  const handleCreatePromo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPromo.imageUrl || promoSaving || promoUploading) return;
+
+    const id = newPromo.id ?? `promo-${Date.now()}`;
 
     setPromoSaving(true);
     setPromoError('');
     try {
-      await onUpdatePromos(updated);
-      setDraftPromos(updated);
-      setShowAddPromo(false);
-      setNewPromo({ imageUrl: '', isActive: true });
-      setPromoUploadError('');
+      await persistPromo(id, newPromo.imageUrl);
     } catch (error) {
       setPromoError(
         error instanceof Error ? error.message : 'Gagal menyimpan poster ke server.',
@@ -392,15 +406,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     const file = e.target.files?.[0];
     // Benarkan fail yang sama dipilih semula selepas dibuang.
     e.target.value = '';
-    if (!file) return;
+    if (!file || promoUploading || promoSaving) return;
 
     setPromoUploadError('');
+    setPromoError('');
+    setPromoSuccess('');
     setPromoUploading(true);
 
     try {
       const blob = await preparePromoImage(file);
       const imageUrl = await uploadPromoImage(blob, currentOutletName);
-      setNewPromo((prev) => ({ ...prev, imageUrl }));
+      const id = newPromo.id ?? `promo-${Date.now()}`;
+
+      // Simpan terus ke Supabase — bukan sekadar pratonton setempat.
+      setNewPromo({ id, imageUrl, isActive: true });
+      await persistPromo(id, imageUrl);
     } catch (error) {
       setPromoUploadError(
         error instanceof Error
@@ -551,7 +571,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAddPromo((open) => !open)}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft"
+                disabled={promoUploading || promoSaving}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Plus className="size-4" />
                 Poster baharu
@@ -789,15 +810,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          const unsavedUrl = newPromo.imageUrl;
                           setShowAddPromo(false);
                           setNewPromo({ imageUrl: '', isActive: true });
                           setPromoUploadError('');
+                          setPromoError('');
+                          if (unsavedUrl) {
+                            void deletePromoImage(unsavedUrl).catch(() => {
+                              // Fail storan yatim tidak menghalang pembatalan.
+                            });
+                          }
                         }}
                         className="text-xs font-semibold text-maroon/70 hover:text-maroon-deep"
                       >
                         Batal
                       </button>
                     </div>
+
+                    <p className="rounded-lg bg-white/60 px-3 py-2 text-[11px] leading-relaxed text-maroon-deep/60">
+                      Pilih gambar sahaja — ia akan terus dimuat naik dan disimpan ke server,
+                      kemudian muncul pada semua paparan outlet bagi outlet yang dipilih.
+                    </p>
 
                     <div>
                       {newPromo.imageUrl ? (
@@ -833,8 +866,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               Buang gambar
                             </button>
                             <p className="text-[11px] leading-relaxed text-maroon-deep/50">
-                              Nisbah 3:4 disyorkan. Gambar dikecilkan secara automatik sebelum
-                              disimpan.
+                              Gambar disimpan ke server selepas dimuat naik. Nisbah 3:4 disyorkan.
                             </p>
                           </div>
                         </div>
@@ -874,17 +906,29 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       )}
                     </div>
 
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={!newPromo.imageUrl || promoUploading || promoSaving}
-                        className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {promoSaving && <Loader2 className="size-4 animate-spin" />}
-                        {promoSaving ? 'Menyimpan...' : 'Simpan poster'}
-                      </button>
-                    </div>
+                    {newPromo.imageUrl && (
+                      <div className="flex flex-wrap items-center justify-end gap-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2">
+                        <p className="mr-auto text-[11px] text-amber-800">
+                          Gambar sudah dimuat naik tetapi belum tersimpan ke pangkalan data.
+                        </p>
+                        <button
+                          type="submit"
+                          disabled={!newPromo.imageUrl || promoUploading || promoSaving}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg bg-gold px-3 text-xs font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {promoSaving && <Loader2 className="size-4 animate-spin" />}
+                          {promoSaving ? 'Menyimpan...' : 'Cuba simpan semula'}
+                        </button>
+                      </div>
+                    )}
                   </form>
+                )}
+
+                {promoSuccess && (
+                  <div className="flex items-center gap-2 rounded-xl border border-[#4f9d6e]/25 bg-[#eef8f1] px-4 py-3 text-xs font-semibold text-[#3f835b]">
+                    <Check className="size-4 shrink-0" />
+                    {promoSuccess}
+                  </div>
                 )}
 
                 {promoError && (
