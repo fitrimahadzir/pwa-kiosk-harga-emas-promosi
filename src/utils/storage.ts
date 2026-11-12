@@ -338,7 +338,14 @@ export async function pushPromos(promos: PromoItem[]): Promise<void> {
       .from('kiosk_promos')
       .upsert(rows, { onConflict: 'id' });
     if (error) {
-      throw new Error(`Gagal menyimpan poster ke server: ${error.message}`);
+      const legacySchema =
+        error.code === '42P10' ||
+        /no unique or exclusion constraint/i.test(error.message);
+      throw new Error(
+        legacySchema
+          ? 'Jadual kiosk_promos masih guna struktur lama. Sila jalankan supabase/migrate-global-promos.sql (atau schema.sql terkini) dalam Supabase SQL Editor.'
+          : `Gagal menyimpan poster ke server: ${error.message}`,
+      );
     }
   }
 
