@@ -794,6 +794,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <p className="gr-kicker text-maroon">Senarai poster</p>
                 <p className="mt-1.5 font-heading text-xl text-maroon-deep">Promosi semasa</p>
                 <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
+                <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-gold-deep/25 bg-gold/10 px-2.5 py-1 text-[11px] font-semibold text-maroon">
+                  <MapPin className="size-3 text-gold-deep" />
+                  Poster untuk outlet: {currentOutletName || '(tiada outlet dipilih)'}
+                </p>
               </div>
 
               <div className="space-y-4 p-5">
