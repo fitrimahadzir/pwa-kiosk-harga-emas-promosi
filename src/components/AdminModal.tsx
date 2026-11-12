@@ -19,6 +19,7 @@ import {
   ChevronDown,
   MapPin,
   PencilLine,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -68,7 +69,8 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
   promos: {
     kicker: 'Kaunter',
     title: 'Poster Promosi',
-    description: 'Poster dipaparkan secara bergilir di skrin tablet kaunter.',
+    description:
+      'Muat naik gambar poster sahaja — ia dipaparkan secara bergilir di skrin tablet kaunter.',
   },
   history: {
     kicker: 'Audit',
@@ -86,6 +88,61 @@ const fieldClass =
   'h-11 w-full rounded-lg border border-line/25 bg-[#fbf6ef] px-3.5 text-sm text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep/45 focus:outline-none focus:ring-2 focus:ring-gold/15';
 
 const labelClass = 'mb-1.5 block text-[11px] font-semibold text-maroon-deep/70';
+
+/** Baca fail sebagai data URL. */
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Fail tidak sah.'));
+    };
+    reader.onerror = () => reject(new Error('Gagal membaca fail.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Kecilkan poster sebelum disimpan dalam localStorage supaya kuota tidak
+ * cepat penuh. Imej kecil dikekalkan seperti asal.
+ */
+async function preparePromoImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Fail yang dipilih bukan gambar.');
+  }
+
+  const raw = await readFileAsDataUrl(file);
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Gambar tidak dapat dibaca.'));
+    img.src = raw;
+  });
+
+  const maxWidth = 1080;
+  const maxHeight = 1440;
+  const scale = Math.min(
+    1,
+    maxWidth / image.naturalWidth,
+    maxHeight / image.naturalHeight,
+  );
+
+  if (scale === 1 && file.size <= 450_000) return raw;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const context = canvas.getContext('2d');
+  if (!context) return raw;
+
+  context.imageSmoothingQuality = 'high';
+  // Latar putih supaya PNG lutsinar tidak menjadi hitam selepas ditukar ke JPEG.
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.82);
+}
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -159,14 +216,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [draftPromos, setDraftPromos] = useState<PromoItem[]>(promos);
   const [showAddPromo, setShowAddPromo] = useState<boolean>(false);
   const [newPromo, setNewPromo] = useState<Partial<PromoItem>>({
-    title: '',
-    subtitle: '',
-    badge: 'PROMOSI KHAS',
-    imageUrl: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?auto=format&fit=crop&w=800&q=80',
-    validUntil: '31 Disember 2026',
-    terms: 'Tertakluk kepada pembelian koleksi terpilih.',
+    imageUrl: '',
     isActive: true,
   });
+  const [promoUploading, setPromoUploading] = useState<boolean>(false);
+  const [promoUploadError, setPromoUploadError] = useState<string>('');
 
   const [draftSettings, setDraftSettings] = useState<ShopSettings>(settings);
   const [settingsSuccess, setSettingsSuccess] = useState<string>('');
@@ -263,16 +317,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleCreatePromo = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPromo.title || !newPromo.imageUrl) return;
+    if (!newPromo.imageUrl) return;
 
     const created: PromoItem = {
       id: `promo-${Date.now()}`,
-      title: newPromo.title || 'Promosi Emas',
-      subtitle: newPromo.subtitle || '',
-      badge: newPromo.badge || 'PROMOSI TERKINI',
-      imageUrl: newPromo.imageUrl || '',
-      validUntil: newPromo.validUntil || 'Sah Hari Ini',
-      terms: newPromo.terms || '',
+      title: `Poster Promosi ${draftPromos.length + 1}`,
+      subtitle: '',
+      badge: '',
+      imageUrl: newPromo.imageUrl,
+      validUntil: '',
+      terms: '',
       isActive: true,
     };
 
@@ -280,27 +334,29 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setDraftPromos(updated);
     onUpdatePromos(updated);
     setShowAddPromo(false);
-    setNewPromo({
-      title: '',
-      subtitle: '',
-      badge: 'PROMOSI KHAS',
-      imageUrl: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?auto=format&fit=crop&w=800&q=80',
-      validUntil: '31 Disember 2026',
-      terms: 'Tertakluk kepada pembelian terpilih.',
-      isActive: true,
-    });
+    setNewPromo({ imageUrl: '', isActive: true });
+    setPromoUploadError('');
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Benarkan fail yang sama dipilih semula selepas dibuang.
+    e.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setNewPromo((prev) => ({ ...prev, imageUrl: reader.result as string }));
-      }
-    };
-    reader.readAsDataURL(file);
+
+    setPromoUploadError('');
+    setPromoUploading(true);
+
+    try {
+      const imageUrl = await preparePromoImage(file);
+      setNewPromo((prev) => ({ ...prev, imageUrl }));
+    } catch (error) {
+      setPromoUploadError(
+        error instanceof Error ? error.message : 'Gagal memproses gambar. Sila cuba lagi.',
+      );
+    } finally {
+      setPromoUploading(false);
+    }
   };
 
   const handleSaveSettings = (e: React.FormEvent) => {
@@ -666,97 +722,97 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </p>
                       <button
                         type="button"
-                        onClick={() => setShowAddPromo(false)}
+                        onClick={() => {
+                          setShowAddPromo(false);
+                          setNewPromo({ imageUrl: '', isActive: true });
+                          setPromoUploadError('');
+                        }}
                         className="text-xs font-semibold text-maroon/70 hover:text-maroon-deep"
                       >
                         Batal
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div>
-                        <label className={labelClass}>Tajuk promosi</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="cth: Pesta Cahaya 916"
-                          value={newPromo.title}
-                          onChange={(e) => setNewPromo({ ...newPromo, title: e.target.value })}
-                          className={fieldClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Badge</label>
-                        <input
-                          type="text"
-                          placeholder="cth: DISKAUN 50% UPAH"
-                          value={newPromo.badge}
-                          onChange={(e) => setNewPromo({ ...newPromo, badge: e.target.value })}
-                          className={fieldClass}
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className={labelClass}>Penerangan ringkas</label>
-                        <input
-                          type="text"
-                          placeholder="cth: Potongan upah bagi rantai leher terpilih"
-                          value={newPromo.subtitle}
-                          onChange={(e) => setNewPromo({ ...newPromo, subtitle: e.target.value })}
-                          className={fieldClass}
-                        />
-                      </div>
-                      <div className="space-y-2 sm:col-span-2">
-                        <label className={labelClass}>Gambar poster (nisbah 3:4)</label>
-                        <div className="flex flex-wrap gap-2">
-                          <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-line/25 bg-[#fffdf9] px-3 text-xs font-semibold text-maroon hover:border-gold-deep/40">
-                            <Upload className="size-4 text-gold-deep" />
-                            Muat naik
-                            <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                          </label>
-                          <input
-                            type="url"
-                            placeholder="Atau tampal URL gambar"
-                            value={newPromo.imageUrl}
-                            onChange={(e) => setNewPromo({ ...newPromo, imageUrl: e.target.value })}
-                            className={`${fieldClass} min-w-[16rem] flex-1`}
-                          />
-                        </div>
-                        {newPromo.imageUrl && (
-                          <div className="mt-2 w-24 overflow-hidden rounded-xl border border-line/20 bg-[#fbf6ef]">
+                    <div>
+                      {newPromo.imageUrl ? (
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                          <div className="w-36 shrink-0 overflow-hidden rounded-xl border border-line/20 bg-[#fbf6ef]">
                             <img
                               src={newPromo.imageUrl}
                               alt="Pratonton poster"
                               className="aspect-[3/4] w-full object-cover"
                             />
                           </div>
-                        )}
-                      </div>
-                      <div>
-                        <label className={labelClass}>Tempoh sah sehingga</label>
-                        <input
-                          type="text"
-                          placeholder="cth: 31 Disember 2026"
-                          value={newPromo.validUntil}
-                          onChange={(e) => setNewPromo({ ...newPromo, validUntil: e.target.value })}
-                          className={fieldClass}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Terma & syarat</label>
-                        <input
-                          type="text"
-                          placeholder="cth: Terhad kepada 50 pelanggan terawal"
-                          value={newPromo.terms}
-                          onChange={(e) => setNewPromo({ ...newPromo, terms: e.target.value })}
-                          className={fieldClass}
-                        />
-                      </div>
+                          <div className="flex flex-col items-start gap-2">
+                            <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-line/25 bg-[#fffdf9] px-3 text-xs font-semibold text-maroon hover:border-gold-deep/40">
+                              <Upload className="size-4 text-gold-deep" />
+                              Tukar gambar
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleFileUpload}
+                                disabled={promoUploading}
+                                className="hidden"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewPromo({ imageUrl: '', isActive: true });
+                                setPromoUploadError('');
+                              }}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#a34a26] hover:bg-[#fbeee9]"
+                            >
+                              <Trash2 className="size-3.5" />
+                              Buang gambar
+                            </button>
+                            <p className="text-[11px] leading-relaxed text-maroon-deep/50">
+                              Nisbah 3:4 disyorkan. Gambar dikecilkan secara automatik sebelum
+                              disimpan.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gold-deep/30 bg-[#fffdf9] px-4 py-8 text-center transition hover:border-gold-deep/55 hover:bg-gold/[0.04]">
+                          {promoUploading ? (
+                            <>
+                              <Loader2 className="size-6 animate-spin text-gold-deep" />
+                              <span className="text-sm font-semibold text-maroon-deep">
+                                Memproses gambar...
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="grid size-11 place-items-center rounded-xl border border-gold-deep/25 bg-gold/10">
+                                <Upload className="size-5 text-gold-deep" />
+                              </span>
+                              <span className="text-sm font-semibold text-maroon-deep">
+                                Muat naik gambar poster
+                              </span>
+                              <span className="text-[11px] text-maroon-deep/50">
+                                JPG, PNG atau WEBP · nisbah 3:4 disyorkan
+                              </span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileUpload}
+                            disabled={promoUploading}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                      {promoUploadError && (
+                        <p className="mt-2 text-xs text-[#a34a26]">{promoUploadError}</p>
+                      )}
                     </div>
 
                     <div className="flex justify-end">
                       <button
                         type="submit"
-                        className="inline-flex h-10 items-center rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep hover:bg-gold-soft"
+                        disabled={!newPromo.imageUrl || promoUploading}
+                        className="inline-flex h-10 items-center rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Simpan poster
                       </button>
@@ -781,15 +837,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="truncate font-heading text-lg leading-none text-maroon-deep">{promo.title}</p>
-                            <span className="rounded-full border border-gold-deep/25 bg-gold/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
-                              {promo.badge}
-                            </span>
+                            {promo.badge && (
+                              <span className="rounded-full border border-gold-deep/25 bg-gold/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
+                                {promo.badge}
+                              </span>
+                            )}
                           </div>
-                          <p className="mt-1 truncate text-xs text-maroon-deep/55">{promo.subtitle}</p>
-                          <p className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-maroon-deep/40">
-                            <Calendar className="size-3 text-gold-deep" />
-                            Sah {promo.validUntil}
-                          </p>
+                          {promo.subtitle && (
+                            <p className="mt-1 truncate text-xs text-maroon-deep/55">{promo.subtitle}</p>
+                          )}
+                          {promo.validUntil && (
+                            <p className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-maroon-deep/40">
+                              <Calendar className="size-3 text-gold-deep" />
+                              Sah {promo.validUntil}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">

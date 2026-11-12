@@ -58,7 +58,11 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   };
 
   const handleSharePromo = (promo: PromoItem) => {
-    const text = `*${promo.title}*\n${promo.subtitle}\nSah Sehingga: ${promo.validUntil}\n${shopName ? `Di ${shopName}` : ''}`;
+    const lines = [`*${promo.title}*`];
+    if (promo.subtitle) lines.push(promo.subtitle);
+    if (promo.validUntil) lines.push(`Sah Sehingga: ${promo.validUntil}`);
+    if (shopName) lines.push(`Di ${shopName}`);
+    const text = lines.join('\n');
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopied(true);
@@ -225,22 +229,30 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
 
             {/* Poster Details in Modal */}
             <div className="p-5 sm:p-6 overflow-y-auto">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="px-3 py-1 bg-[#2a0404] text-[#d4a13a] border border-[#d4a13a]/40 rounded-full text-[11px] font-bold uppercase tracking-wider font-mono">
-                  {zoomedPromo.badge || 'PROMOSI EKSKLUSIF'}
-                </span>
-                <span className="text-xs text-[#d8be8a] flex items-center gap-1">
-                  <Calendar size={13} />
-                  Sah hingga: {zoomedPromo.validUntil}
-                </span>
-              </div>
+              {(zoomedPromo.badge || zoomedPromo.validUntil) && (
+                <div className="flex items-center gap-2 mb-2">
+                  {zoomedPromo.badge && (
+                    <span className="px-3 py-1 bg-[#2a0404] text-[#d4a13a] border border-[#d4a13a]/40 rounded-full text-[11px] font-bold uppercase tracking-wider font-mono">
+                      {zoomedPromo.badge}
+                    </span>
+                  )}
+                  {zoomedPromo.validUntil && (
+                    <span className="text-xs text-[#d8be8a] flex items-center gap-1">
+                      <Calendar size={13} />
+                      Sah hingga: {zoomedPromo.validUntil}
+                    </span>
+                  )}
+                </div>
+              )}
 
               <h2 className="text-xl sm:text-2xl font-bold text-[#ece2d0] font-serif">
                 {zoomedPromo.title}
               </h2>
-              <p className="text-sm text-[#d8be8a] mt-1 font-medium">
-                {zoomedPromo.subtitle}
-              </p>
+              {zoomedPromo.subtitle && (
+                <p className="text-sm text-[#d8be8a] mt-1 font-medium">
+                  {zoomedPromo.subtitle}
+                </p>
+              )}
 
               {/* Terms and conditions */}
               <div className="mt-4 bg-[#2a0404]/90 p-3.5 rounded-xl border border-[#d4a13a]/30 text-xs">
