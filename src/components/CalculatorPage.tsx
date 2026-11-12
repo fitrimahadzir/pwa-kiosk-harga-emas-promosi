@@ -58,7 +58,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
 
       {/* Calculator + live price reference */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-        <div className="aspect-[3/1] rounded-2xl overflow-hidden bg-cream border border-line/20">
+        <div className="aspect-[3/1] rounded-2xl bg-cream border border-line/20">
           <SalesCalculator
             prices={prices}
             selectedPurity={selectedPurity}
