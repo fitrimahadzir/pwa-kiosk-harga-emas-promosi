@@ -37,9 +37,41 @@ create table if not exists public.kiosk_prices (
   purity text not null check (purity in ('999', '916', '375')),
   sell_price numeric not null,
   buy_price numeric not null,
+  -- Catatan admin untuk entri harga ini (disalin ke sejarah oleh trigger).
+  note text not null default '',
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   primary key (outlet_name, purity)
+);
+
+-- Poster promosi — satu baris bagi setiap poster, gambar disimpan di Storage.
+create table if not exists public.kiosk_promos (
+  id text not null,
+  outlet_name text not null,
+  title text not null default '',
+  subtitle text not null default '',
+  badge text not null default '',
+  image_url text not null default '',
+  valid_until text not null default '',
+  terms text not null default '',
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (outlet_name, id)
+);
+
+-- Tetapan paparan / resit bagi setiap outlet.
+create table if not exists public.kiosk_settings (
+  outlet_name text primary key,
+  shop_name text not null default '',
+  branch text not null default '',
+  phone text not null default '',
+  address text not null default '',
+  tagline text not null default '',
+  currency text not null default 'MYR',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 -- Admin = pengguna Supabase Auth yang didaftarkan di sini.
@@ -71,6 +103,32 @@ create table if not exists public.kiosk_price_history (
 alter table public.kiosk_prices
   alter column sell_price type numeric(12, 2),
   alter column buy_price type numeric(12, 2);
+
+-- Migrasi untuk pangkalan data sedia ada (idempotent).
+alter table public.kiosk_prices
+  add column if not exists note text not null default '';
+
+alter table public.kiosk_promos
+  add column if not exists title text not null default '',
+  add column if not exists subtitle text not null default '',
+  add column if not exists badge text not null default '',
+  add column if not exists image_url text not null default '',
+  add column if not exists valid_until text not null default '',
+  add column if not exists terms text not null default '',
+  add column if not exists is_active boolean not null default true,
+  add column if not exists sort_order integer not null default 0,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.kiosk_settings
+  add column if not exists shop_name text not null default '',
+  add column if not exists branch text not null default '',
+  add column if not exists phone text not null default '',
+  add column if not exists address text not null default '',
+  add column if not exists tagline text not null default '',
+  add column if not exists currency text not null default 'MYR',
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
 
 do $$
 begin
@@ -186,6 +244,16 @@ create trigger kiosk_prices_set_updated_at
   before update on public.kiosk_prices
   for each row execute function public.kiosk_set_updated_at();
 
+drop trigger if exists kiosk_promos_set_updated_at on public.kiosk_promos;
+create trigger kiosk_promos_set_updated_at
+  before update on public.kiosk_promos
+  for each row execute function public.kiosk_set_updated_at();
+
+drop trigger if exists kiosk_settings_set_updated_at on public.kiosk_settings;
+create trigger kiosk_settings_set_updated_at
+  before update on public.kiosk_settings
+  for each row execute function public.kiosk_set_updated_at();
+
 create or replace function public.kiosk_log_price_change()
 returns trigger
 language plpgsql
@@ -195,15 +263,16 @@ as $$
 begin
   if tg_op = 'INSERT' then
     insert into public.kiosk_price_history
-      (outlet_name, purity, old_sell, new_sell, old_buy, new_buy, changed_by)
+      (outlet_name, purity, old_sell, new_sell, old_buy, new_buy, changed_by, note)
     values
-      (new.outlet_name, new.purity, null, new.sell_price, null, new.buy_price, auth.uid());
+      (new.outlet_name, new.purity, null, new.sell_price, null, new.buy_price,
+       auth.uid(), nullif(new.note, ''));
   else
     insert into public.kiosk_price_history
-      (outlet_name, purity, old_sell, new_sell, old_buy, new_buy, changed_by)
+      (outlet_name, purity, old_sell, new_sell, old_buy, new_buy, changed_by, note)
     values
       (new.outlet_name, new.purity, old.sell_price, new.sell_price,
-       old.buy_price, new.buy_price, auth.uid());
+       old.buy_price, new.buy_price, auth.uid(), nullif(new.note, ''));
   end if;
 
   return new;
@@ -341,6 +410,118 @@ create policy "Admins read price history"
 revoke all on public.kiosk_price_history from anon, authenticated;
 grant select on public.kiosk_price_history to authenticated;
 
+-- ---- kiosk_promos: awam baca; hanya admin tulis ----
+alter table public.kiosk_promos enable row level security;
+alter table public.kiosk_promos force row level security;
+
+drop policy if exists "Kiosk promos readable" on public.kiosk_promos;
+drop policy if exists "Kiosk admins can insert promos" on public.kiosk_promos;
+drop policy if exists "Kiosk admins can update promos" on public.kiosk_promos;
+drop policy if exists "Kiosk admins can delete promos" on public.kiosk_promos;
+
+create policy "Kiosk promos readable"
+  on public.kiosk_promos
+  for select to anon, authenticated
+  using (true);
+
+create policy "Kiosk admins can insert promos"
+  on public.kiosk_promos
+  for insert to authenticated
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can update promos"
+  on public.kiosk_promos
+  for update to authenticated
+  using (public.is_kiosk_admin())
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can delete promos"
+  on public.kiosk_promos
+  for delete to authenticated
+  using (public.is_kiosk_admin());
+
+revoke all on public.kiosk_promos from anon, authenticated;
+grant select on public.kiosk_promos to anon, authenticated;
+grant insert, update, delete on public.kiosk_promos to authenticated;
+
+-- ---- kiosk_settings: awam baca; hanya admin tulis ----
+alter table public.kiosk_settings enable row level security;
+alter table public.kiosk_settings force row level security;
+
+drop policy if exists "Kiosk settings readable" on public.kiosk_settings;
+drop policy if exists "Kiosk admins can insert settings" on public.kiosk_settings;
+drop policy if exists "Kiosk admins can update settings" on public.kiosk_settings;
+drop policy if exists "Kiosk admins can delete settings" on public.kiosk_settings;
+
+create policy "Kiosk settings readable"
+  on public.kiosk_settings
+  for select to anon, authenticated
+  using (true);
+
+create policy "Kiosk admins can insert settings"
+  on public.kiosk_settings
+  for insert to authenticated
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can update settings"
+  on public.kiosk_settings
+  for update to authenticated
+  using (public.is_kiosk_admin())
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can delete settings"
+  on public.kiosk_settings
+  for delete to authenticated
+  using (public.is_kiosk_admin());
+
+revoke all on public.kiosk_settings from anon, authenticated;
+grant select on public.kiosk_settings to anon, authenticated;
+grant insert, update, delete on public.kiosk_settings to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 6b. Supabase Storage — bucket poster promosi
+-- ---------------------------------------------------------------------------
+-- Gambar poster disimpan di sini; URL awam disimpan dalam kiosk_promos.
+-- Awam hanya boleh BACA fail; hanya admin boleh muat naik / padam.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'promo-posters',
+  'promo-posters',
+  true,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update
+  set public = true,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Promo posters are publicly readable" on storage.objects;
+drop policy if exists "Kiosk admins can upload promo posters" on storage.objects;
+drop policy if exists "Kiosk admins can update promo posters" on storage.objects;
+drop policy if exists "Kiosk admins can delete promo posters" on storage.objects;
+
+create policy "Promo posters are publicly readable"
+  on storage.objects
+  for select to anon, authenticated
+  using (bucket_id = 'promo-posters');
+
+create policy "Kiosk admins can upload promo posters"
+  on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'promo-posters' and public.is_kiosk_admin());
+
+create policy "Kiosk admins can update promo posters"
+  on storage.objects
+  for update to authenticated
+  using (bucket_id = 'promo-posters' and public.is_kiosk_admin())
+  with check (bucket_id = 'promo-posters' and public.is_kiosk_admin());
+
+create policy "Kiosk admins can delete promo posters"
+  on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'promo-posters' and public.is_kiosk_admin());
+
 -- ---------------------------------------------------------------------------
 -- 7. Realtime (postgres_changes) untuk harga
 -- ---------------------------------------------------------------------------
@@ -353,6 +534,24 @@ begin
       and tablename = 'kiosk_prices'
   ) then
     alter publication supabase_realtime add table public.kiosk_prices;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'kiosk_promos'
+  ) then
+    alter publication supabase_realtime add table public.kiosk_promos;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'kiosk_settings'
+  ) then
+    alter publication supabase_realtime add table public.kiosk_settings;
   end if;
 exception
   when undefined_object then

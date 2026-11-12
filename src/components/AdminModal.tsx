@@ -30,6 +30,7 @@ import {
   ShopSettings,
 } from '../types/gold';
 import { formatMYR } from '../utils/calculator';
+import { deletePromoImage, uploadPromoImage } from '../utils/storage';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -43,9 +44,9 @@ interface AdminModalProps {
   prices: Record<GoldPurity, GoldPriceItem>;
   onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => Promise<void>;
   promos: PromoItem[];
-  onUpdatePromos: (newPromos: PromoItem[]) => void;
+  onUpdatePromos: (newPromos: PromoItem[]) => Promise<void>;
   settings: ShopSettings;
-  onUpdateSettings: (newSettings: ShopSettings) => void;
+  onUpdateSettings: (newSettings: ShopSettings) => Promise<void>;
   history: PriceHistoryEntry[];
   onResetDefaults: () => Promise<void>;
 }
@@ -89,59 +90,62 @@ const fieldClass =
 
 const labelClass = 'mb-1.5 block text-[11px] font-semibold text-maroon-deep/70';
 
-/** Baca fail sebagai data URL. */
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') resolve(reader.result);
-      else reject(new Error('Fail tidak sah.'));
-    };
-    reader.onerror = () => reject(new Error('Gagal membaca fail.'));
-    reader.readAsDataURL(file);
-  });
-}
-
 /**
- * Kecilkan poster sebelum disimpan dalam localStorage supaya kuota tidak
- * cepat penuh. Imej kecil dikekalkan seperti asal.
+ * Kecilkan poster sebelum dimuat naik ke Supabase Storage.
+ * Imej JPEG/WEBP kecil dikekalkan seperti asal.
  */
-async function preparePromoImage(file: File): Promise<string> {
+async function preparePromoImage(file: File): Promise<Blob> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Fail yang dipilih bukan gambar.');
   }
 
-  const raw = await readFileAsDataUrl(file);
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Gambar tidak dapat dibaca.'));
-    img.src = raw;
-  });
+  const objectUrl = URL.createObjectURL(file);
 
-  const maxWidth = 1080;
-  const maxHeight = 1440;
-  const scale = Math.min(
-    1,
-    maxWidth / image.naturalWidth,
-    maxHeight / image.naturalHeight,
-  );
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Gambar tidak dapat dibaca.'));
+      img.src = objectUrl;
+    });
 
-  if (scale === 1 && file.size <= 450_000) return raw;
+    const maxWidth = 1080;
+    const maxHeight = 1440;
+    const scale = Math.min(
+      1,
+      maxWidth / image.naturalWidth,
+      maxHeight / image.naturalHeight,
+    );
 
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    if (
+      scale === 1 &&
+      file.size <= 450_000 &&
+      (file.type === 'image/jpeg' || file.type === 'image/webp')
+    ) {
+      return file;
+    }
 
-  const context = canvas.getContext('2d');
-  if (!context) return raw;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
 
-  context.imageSmoothingQuality = 'high';
-  // Latar putih supaya PNG lutsinar tidak menjadi hitam selepas ditukar ke JPEG.
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.82);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Pelayar tidak menyokong pemprosesan gambar.');
+
+    context.imageSmoothingQuality = 'high';
+    // Latar putih supaya PNG lutsinar tidak menjadi hitam selepas ditukar ke JPEG.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.82),
+    );
+    if (!blob) throw new Error('Gagal memproses gambar.');
+    return blob;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function initials(name: string) {
@@ -221,9 +225,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   });
   const [promoUploading, setPromoUploading] = useState<boolean>(false);
   const [promoUploadError, setPromoUploadError] = useState<string>('');
+  const [promoSaving, setPromoSaving] = useState<boolean>(false);
+  const [promoError, setPromoError] = useState<string>('');
 
   const [draftSettings, setDraftSettings] = useState<ShopSettings>(settings);
   const [settingsSuccess, setSettingsSuccess] = useState<string>('');
+  const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
+  const [settingsError, setSettingsError] = useState<string>('');
 
   // Keep drafts in sync with the selected outlet's stored data. Without this,
   // switching outlets would keep editing the previous outlet's prices/promos.
@@ -299,25 +307,56 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handleTogglePromo = (id: string) => {
+  const handleTogglePromo = async (id: string) => {
+    if (promoSaving) return;
+
     const updated = draftPromos.map((promo) =>
       promo.id === id ? { ...promo, isActive: !promo.isActive } : promo,
     );
-    setDraftPromos(updated);
-    onUpdatePromos(updated);
-  };
 
-  const handleDeletePromo = (id: string) => {
-    if (window.confirm('Adakah anda pasti ingin memadam poster promosi ini?')) {
-      const updated = draftPromos.filter((promo) => promo.id !== id);
+    setPromoSaving(true);
+    setPromoError('');
+    try {
+      await onUpdatePromos(updated);
       setDraftPromos(updated);
-      onUpdatePromos(updated);
+    } catch (error) {
+      setPromoError(
+        error instanceof Error ? error.message : 'Gagal mengemas kini poster.',
+      );
+    } finally {
+      setPromoSaving(false);
     }
   };
 
-  const handleCreatePromo = (e: React.FormEvent) => {
+  const handleDeletePromo = async (id: string) => {
+    if (promoSaving) return;
+    if (!window.confirm('Adakah anda pasti ingin memadam poster promosi ini?')) return;
+
+    const target = draftPromos.find((promo) => promo.id === id);
+    const updated = draftPromos.filter((promo) => promo.id !== id);
+
+    setPromoSaving(true);
+    setPromoError('');
+    try {
+      await onUpdatePromos(updated);
+      setDraftPromos(updated);
+      if (target?.imageUrl) {
+        void deletePromoImage(target.imageUrl).catch(() => {
+          // Fail storan yatim tidak menghalang pemadaman rekod.
+        });
+      }
+    } catch (error) {
+      setPromoError(
+        error instanceof Error ? error.message : 'Gagal memadam poster.',
+      );
+    } finally {
+      setPromoSaving(false);
+    }
+  };
+
+  const handleCreatePromo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPromo.imageUrl) return;
+    if (!newPromo.imageUrl || promoSaving) return;
 
     const created: PromoItem = {
       id: `promo-${Date.now()}`,
@@ -331,11 +370,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     };
 
     const updated = [created, ...draftPromos];
-    setDraftPromos(updated);
-    onUpdatePromos(updated);
-    setShowAddPromo(false);
-    setNewPromo({ imageUrl: '', isActive: true });
-    setPromoUploadError('');
+
+    setPromoSaving(true);
+    setPromoError('');
+    try {
+      await onUpdatePromos(updated);
+      setDraftPromos(updated);
+      setShowAddPromo(false);
+      setNewPromo({ imageUrl: '', isActive: true });
+      setPromoUploadError('');
+    } catch (error) {
+      setPromoError(
+        error instanceof Error ? error.message : 'Gagal menyimpan poster ke server.',
+      );
+    } finally {
+      setPromoSaving(false);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -348,22 +398,38 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setPromoUploading(true);
 
     try {
-      const imageUrl = await preparePromoImage(file);
+      const blob = await preparePromoImage(file);
+      const imageUrl = await uploadPromoImage(blob, currentOutletName);
       setNewPromo((prev) => ({ ...prev, imageUrl }));
     } catch (error) {
       setPromoUploadError(
-        error instanceof Error ? error.message : 'Gagal memproses gambar. Sila cuba lagi.',
+        error instanceof Error
+          ? error.message
+          : 'Gagal memuat naik gambar. Sila cuba lagi.',
       );
     } finally {
       setPromoUploading(false);
     }
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateSettings({ ...draftSettings });
-    setSettingsSuccess('Tetapan kedai berjaya disimpan.');
-    setTimeout(() => setSettingsSuccess(''), 3000);
+    if (settingsSaving) return;
+
+    setSettingsSaving(true);
+    setSettingsError('');
+    setSettingsSuccess('');
+    try {
+      await onUpdateSettings({ ...draftSettings });
+      setSettingsSuccess('Tetapan kedai berjaya disimpan ke server.');
+      setTimeout(() => setSettingsSuccess(''), 3000);
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error ? error.message : 'Gagal menyimpan tetapan.',
+      );
+    } finally {
+      setSettingsSaving(false);
+    }
   };
 
   const selectTab = (tab: AdminTab) => {
@@ -778,7 +844,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <>
                               <Loader2 className="size-6 animate-spin text-gold-deep" />
                               <span className="text-sm font-semibold text-maroon-deep">
-                                Memproses gambar...
+                                Memuat naik gambar...
                               </span>
                             </>
                           ) : (
@@ -811,13 +877,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <div className="flex justify-end">
                       <button
                         type="submit"
-                        disabled={!newPromo.imageUrl || promoUploading}
-                        className="inline-flex h-10 items-center rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!newPromo.imageUrl || promoUploading || promoSaving}
+                        className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Simpan poster
+                        {promoSaving && <Loader2 className="size-4 animate-spin" />}
+                        {promoSaving ? 'Menyimpan...' : 'Simpan poster'}
                       </button>
                     </div>
                   </form>
+                )}
+
+                {promoError && (
+                  <div className="rounded-xl border border-rose-300/50 bg-rose-50 px-4 py-3 text-xs text-rose-800">
+                    {promoError}
+                  </div>
                 )}
 
                 <div className="space-y-2.5">
@@ -858,7 +931,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <button
                           type="button"
                           onClick={() => handleTogglePromo(promo.id)}
-                          className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                          disabled={promoSaving}
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] disabled:cursor-not-allowed disabled:opacity-50 ${
                             promo.isActive
                               ? 'border-[#4f9d6e]/30 bg-[#eef8f1] text-[#3f835b]'
                               : 'border-line/20 bg-white text-maroon-deep/50'
@@ -869,7 +943,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <button
                           type="button"
                           onClick={() => handleDeletePromo(promo.id)}
-                          className="grid size-8 place-items-center rounded-lg text-[#a34a26] hover:bg-[#fbeee9]"
+                          disabled={promoSaving}
+                          className="grid size-8 place-items-center rounded-lg text-[#a34a26] hover:bg-[#fbeee9] disabled:cursor-not-allowed disabled:opacity-50"
                           aria-label={`Padam ${promo.title}`}
                         >
                           <Trash2 className="size-4" />
@@ -958,6 +1033,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     {settingsSuccess}
                   </div>
                 )}
+                {settingsError && (
+                  <div className="rounded-xl border border-rose-300/50 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
+                    {settingsError}
+                  </div>
+                )}
                 <div>
                   <label className={labelClass}>Nama kedai emas</label>
                   <input
@@ -1011,7 +1091,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     onClick={async () => {
                       if (
                         !window.confirm(
-                          'Adakah anda pasti ingin memulihkan semua data harga dan promosi ke tetapan asal?',
+                          'Adakah anda pasti ingin memulihkan harga dan tetapan kedai ke nilai asal? Poster promosi tidak akan dipadam.',
                         )
                       ) {
                         return;
@@ -1034,9 +1114,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex h-10 items-center rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep hover:bg-gold-soft"
+                    disabled={settingsSaving}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Simpan tetapan
+                    {settingsSaving && <Loader2 className="size-4 animate-spin" />}
+                    {settingsSaving ? 'Menyimpan...' : 'Simpan tetapan'}
                   </button>
                 </div>
               </form>

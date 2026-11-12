@@ -1,4 +1,10 @@
-import { GoldPriceItem, GoldPurity, PromoItem, PriceHistoryEntry, ShopSettings, OutletConfig } from '../types/gold';
+import {
+  GoldPriceItem,
+  GoldPurity,
+  PromoItem,
+  PriceHistoryEntry,
+  ShopSettings,
+} from '../types/gold';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 /** Outlet yang pernah dinamakan semula: nama lama -> nama semasa. */
@@ -6,15 +12,12 @@ export const OUTLET_RENAMES: Record<string, string> = {
   HeadQuarters: 'HQ Warehouse',
 };
 
-const PRICES_KEY = 'emaspos_gold_prices_v1';
-const PROMOS_KEY = 'emaspos_promos_v1';
-const SETTINGS_KEY = 'emaspos_settings_v1';
-const HISTORY_KEY = 'emaspos_price_history_v1';
-
-const OUTLETS_KEY = 'emaspos_outlets_v1';
+/**
+ * Hanya pilihan outlet semasa disimpan pada peranti (sessionStorage).
+ * Semua DATA perniagaan — harga, poster, tetapan, sejarah — datang dari
+ * Supabase. Tiada cache localStorage lagi.
+ */
 const CURRENT_OUTLET_KEY = 'emaspos_current_outlet_v1';
-/** Senarai nama outlet awam terakhir yang disahkan server (role = 'outlet'). */
-const PUBLIC_OUTLETS_KEY = 'emaspos_kiosk_outlet_names_v1';
 
 export const DEFAULT_PRICES: Record<GoldPurity, GoldPriceItem> = {
   '999': {
@@ -49,48 +52,7 @@ export const DEFAULT_PRICES: Record<GoldPurity, GoldPriceItem> = {
   },
 };
 
-export const DEFAULT_PROMOS: PromoItem[] = [
-  {
-    id: 'promo-1',
-    title: 'Koleksi Cahaya Kasih 916',
-    subtitle: 'Potongan 50% Upah Tukang untuk Semua Rantai Leher & Gelang',
-    badge: 'DISKAUN 50% UPAH',
-    imageUrl: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?auto=format&fit=crop&w=900&h=1200&q=85',
-    validUntil: '30 November 2026',
-    terms: 'Tertakluk kepada pembelian koleksi terpilih 916 seberat 5g ke atas. Sah di semua cawangan.',
-    isActive: true,
-  },
-  {
-    id: 'promo-2',
-    title: 'Tawaran Hebat Trade-In Emas',
-    subtitle: 'Nilai Tukar Ganti Tertinggi + Tambahan RM 5.00/gram',
-    badge: 'TRADE-IN BONUS',
-    imageUrl: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&h=1200&q=85',
-    validUntil: '15 Disember 2026',
-    terms: 'Bawa barang kemas lama anda untuk tukar ganti dengan rekaan baharu tanpa caj tersembunyi.',
-    isActive: true,
-  },
-  {
-    id: 'promo-3',
-    title: 'Pelaburan Gold Bar 999',
-    subtitle: 'Percuma Yuran Premium Pembuatan untuk Pembelian 10g Ke Atas',
-    badge: 'ZERO PREMIUM 999',
-    imageUrl: 'https://images.unsplash.com/photo-1610375461246-83df859d849d?auto=format&fit=crop&w=900&h=1200&q=85',
-    validUntil: 'Sah Sepanjang Bulan Ini',
-    terms: 'Khas untuk jongkong emas dan dinar 999 bersijil rasmi antarabangsa LBMA / Tempatan.',
-    isActive: true,
-  },
-  {
-    id: 'promo-4',
-    title: 'Koleksi Cincin Tunang Emas 375 & 916',
-    subtitle: 'Rebat Tunai Segera RM 100 dengan Pembelian Sepasang Cincin',
-    badge: 'REBAT RM 100',
-    imageUrl: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&h=1200&q=85',
-    validUntil: '31 Disember 2026',
-    terms: 'Termasuk ukiran nama percuma dan kotak baldu eksklusif merah marun.',
-    isActive: true,
-  },
-];
+export const DEFAULT_PROMOS: PromoItem[] = [];
 
 export const DEFAULT_SETTINGS: ShopSettings = {
   shopName: 'GOLD RESERVE',
@@ -102,113 +64,153 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   currency: 'MYR',
 };
 
-export const DEFAULT_HISTORY: PriceHistoryEntry[] = [
-  {
-    id: 'hist-1',
-    timestamp: new Date(Date.now() - 86400000 * 2).toISOString(),
-    purity: '916',
-    oldSellPrice: 423.0,
-    newSellPrice: 425.0,
-    oldBuyPrice: 378.0,
-    newBuyPrice: 380.0,
-    adminNote: 'Pelarasan harga pasaran emas dunia New York / LBMA',
-  },
-  {
-    id: 'hist-2',
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    purity: '999',
-    oldSellPrice: 465.0,
-    newSellPrice: 468.0,
-    oldBuyPrice: 418.0,
-    newBuyPrice: 422.0,
-    adminNote: 'Kemas kini pagi sesi dagangan Bursa',
-  },
-  {
-    id: 'hist-3',
-    timestamp: new Date().toISOString(),
-    purity: '916',
-    oldSellPrice: 425.0,
-    newSellPrice: 428.0,
-    oldBuyPrice: 380.0,
-    newBuyPrice: 382.0,
-    adminNote: 'Kemas kini harga semasa jualan kaunter',
-  },
-];
-
-export const DEFAULT_OUTLET: OutletConfig = {
-  outletName: DEFAULT_SETTINGS.outletName,
-  prices: DEFAULT_PRICES,
-  promos: DEFAULT_PROMOS,
-  settings: DEFAULT_SETTINGS,
-  history: DEFAULT_HISTORY,
-  updatedAt: new Date().toISOString(),
-};
-
-// Broadcast channel for real-time synchronization between tabs/devices
-let broadcastChannel: BroadcastChannel | null = null;
-try {
-  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-    broadcastChannel = new BroadcastChannel('emaspos_sync_channel');
+function requireClient() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase belum dikonfigurasi.');
   }
-} catch {
-  // BroadcastChannel might fail in some restricted environments
+  return supabase;
 }
 
-export function notifySync(type: 'prices' | 'promos' | 'settings' | 'history') {
-  if (broadcastChannel) {
-    broadcastChannel.postMessage({ type, timestamp: Date.now() });
-  }
+function isGoldPurity(value: string): value is GoldPurity {
+  return value === '999' || value === '916' || value === '375';
 }
 
-export function subscribeToSync(callback: (type: string) => void) {
-  if (!broadcastChannel) return () => {};
-  const handler = (e: MessageEvent) => {
-    if (e.data?.type) {
-      callback(e.data.type);
-    }
-  };
-  broadcastChannel.addEventListener('message', handler);
-  return () => {
-    broadcastChannel?.removeEventListener('message', handler);
+function cloneDefaultPrices(): Record<GoldPurity, GoldPriceItem> {
+  return {
+    '999': { ...DEFAULT_PRICES['999'] },
+    '916': { ...DEFAULT_PRICES['916'] },
+    '375': { ...DEFAULT_PRICES['375'] },
   };
 }
 
 /**
- * Langgan perubahan harga (postgres_changes) untuk satu outlet.
- * Payload TIDAK dipercayai: pemanggil mesti fetch semula dari jadual.
+ * Nama outlet yang selamat dipaparkan di kiosk.
+ * `Admin` disekat sebagai pertahanan tambahan walaupun server sudah menapis
+ * `role = 'outlet'`.
  */
-export function subscribeToOutletPrices(
-  outletName: string,
-  onChange: () => void
-): () => void {
-  if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
-    return () => {};
+function sanitizePublicOutletNames(names: unknown[]): string[] {
+  const unique = new Set<string>();
+  for (const value of names) {
+    if (typeof value !== 'string') continue;
+    const name = value.trim();
+    if (!name) continue;
+    if (name.toLowerCase() === 'admin') continue;
+    unique.add(name);
+  }
+  return Array.from(unique).sort();
+}
+
+// ---------------------------------------------------------------------------
+// Pilihan outlet pada peranti (bukan data perniagaan)
+// ---------------------------------------------------------------------------
+
+export function loadCurrentOutletName(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = sessionStorage.getItem(CURRENT_OUTLET_KEY);
+    if (!saved) return null;
+    return OUTLET_RENAMES[saved] ?? saved;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCurrentOutletName(outletName: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(CURRENT_OUTLET_KEY, outletName);
+  } catch {
+    // sessionStorage disekat — pilihan outlet kekal dalam memori sahaja.
+  }
+}
+
+export function clearCurrentOutletName() {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(CURRENT_OUTLET_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Buang sisa cache localStorage daripada versi lama. Semua data perniagaan
+ * kini datang dari Supabase, jadi kunci `emaspos_*` di localStorage tidak
+ * lagi digunakan dan boleh dipadam terus.
+ */
+export function purgeLegacyLocalStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    const staleKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('emaspos_')) staleKeys.push(key);
+    }
+    for (const key of staleKeys) localStorage.removeItem(key);
+  } catch {
+    // localStorage disekat — tiada apa yang perlu dibersihkan.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Outlet
+// ---------------------------------------------------------------------------
+
+/** Senarai nama outlet awam (role = 'outlet') terus daripada server. */
+export async function fetchOutletNames(): Promise<string[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase.rpc('kiosk_outlet_names');
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca senarai outlet:', error.message);
+    return [];
   }
 
-  const channel = supabase
-    .channel(`kiosk_prices:${outletName}`)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'kiosk_prices' },
-      (payload) => {
-        const row = (payload.new ?? payload.old) as { outlet_name?: string } | null;
-        if (!row || row.outlet_name === outletName) onChange();
-      }
-    )
-    .subscribe();
+  if (!Array.isArray(data)) return [];
 
-  return () => {
-    try {
-      void supabase?.removeChannel(channel);
-    } catch {
-      // ignore
-    }
+  return sanitizePublicOutletNames(
+    data.map((row) => (row as { name?: string }).name),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Harga
+// ---------------------------------------------------------------------------
+
+type PriceRow = {
+  outlet_name?: string;
+  purity?: string;
+  sell_price?: number | string;
+  buy_price?: number | string;
+  updated_at?: string;
+};
+
+function applyPriceRow(
+  target: Record<GoldPurity, GoldPriceItem>,
+  row: PriceRow,
+): boolean {
+  const purity = row.purity;
+  if (typeof purity !== 'string' || !isGoldPurity(purity)) return false;
+
+  const sell = Number(row.sell_price);
+  const buy = Number(row.buy_price);
+  if (!Number.isFinite(sell) || !Number.isFinite(buy) || sell <= 0 || buy < 0 || buy > sell) {
+    return false;
+  }
+
+  target[purity] = {
+    ...target[purity],
+    sellPrice: sell,
+    buyPrice: buy,
+    updatedAt: row.updated_at ?? new Date().toISOString(),
   };
+  return true;
 }
 
 /** Baca harga terkini sesuatu outlet. Pulangkan null jika tiada/ralat. */
 export async function fetchOutletPrices(
-  outletName: string
+  outletName: string,
 ): Promise<Record<GoldPurity, GoldPriceItem> | null> {
   if (!isSupabaseConfigured || !supabase) return null;
 
@@ -226,31 +228,39 @@ export async function fetchOutletPrices(
   const next = cloneDefaultPrices();
   let found = false;
 
-  for (const row of data as Array<{
-    purity?: string;
-    sell_price?: number | string;
-    buy_price?: number | string;
-    updated_at?: string;
-  }>) {
-    const purity = row.purity;
-    if (typeof purity !== 'string' || !isGoldPurity(purity)) continue;
-
-    const sell = Number(row.sell_price);
-    const buy = Number(row.buy_price);
-    if (!Number.isFinite(sell) || !Number.isFinite(buy) || sell <= 0 || buy < 0 || buy > sell) {
-      continue;
-    }
-
-    next[purity] = {
-      ...next[purity],
-      sellPrice: sell,
-      buyPrice: buy,
-      updatedAt: row.updated_at ?? new Date().toISOString(),
-    };
-    found = true;
+  for (const row of data as PriceRow[]) {
+    if (applyPriceRow(next, row)) found = true;
   }
 
   return found ? next : null;
+}
+
+/** Semua harga untuk jadual perbandingan admin. */
+export async function fetchAllOutletPrices(): Promise<
+  Record<string, Record<GoldPurity, GoldPriceItem>>
+> {
+  if (!isSupabaseConfigured || !supabase) return {};
+
+  const { data, error } = await supabase
+    .from('kiosk_prices')
+    .select('outlet_name, purity, sell_price, buy_price, updated_at');
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca semua harga:', error.message);
+    return {};
+  }
+  if (!Array.isArray(data)) return {};
+
+  const byOutlet: Record<string, Record<GoldPurity, GoldPriceItem>> = {};
+
+  for (const row of data as PriceRow[]) {
+    const outletName = typeof row.outlet_name === 'string' ? row.outlet_name : '';
+    if (!outletName) continue;
+    const target = byOutlet[outletName] ?? cloneDefaultPrices();
+    if (applyPriceRow(target, row)) byOutlet[outletName] = target;
+  }
+
+  return byOutlet;
 }
 
 /**
@@ -259,20 +269,20 @@ export async function fetchOutletPrices(
  */
 export async function pushOutletPrices(
   outletName: string,
-  prices: Record<GoldPurity, GoldPriceItem>
+  prices: Record<GoldPurity, GoldPriceItem>,
+  note = '',
 ): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
-    throw new Error('Supabase belum dikonfigurasi.');
-  }
+  const db = requireClient();
 
   const priceData = (['999', '916', '375'] as GoldPurity[]).map((purity) => ({
     outlet_name: outletName,
     purity,
     sell_price: prices[purity].sellPrice,
     buy_price: prices[purity].buyPrice,
+    note,
   }));
 
-  const { error } = await supabase
+  const { error } = await db
     .from('kiosk_prices')
     .upsert(priceData, { onConflict: 'outlet_name,purity' });
 
@@ -281,343 +291,315 @@ export async function pushOutletPrices(
   }
 }
 
-// Outlet-scoped storage
-export function loadOutlets(): Record<string, OutletConfig> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const saved = localStorage.getItem(OUTLETS_KEY);
-    if (!saved) return {};
-    const parsed = JSON.parse(saved);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const outlets = parsed as Record<string, OutletConfig>;
-    // Rename legacy outlets (e.g. HeadQuarters -> HQ Warehouse) so previously
-    // stored data is carried over to the current outlet name.
-    for (const [legacyName, nextName] of Object.entries(OUTLET_RENAMES)) {
-      const legacy = outlets[legacyName];
-      if (!legacy) continue;
-      if (!outlets[nextName]) {
-        outlets[nextName] = { ...legacy, outletName: nextName };
-      }
-      delete outlets[legacyName];
-    }
-    return outlets;
-  } catch {
-    return {};
-  }
-}
+// ---------------------------------------------------------------------------
+// Poster promosi
+// ---------------------------------------------------------------------------
 
-export function saveOutlets(outlets: Record<string, OutletConfig>) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(OUTLETS_KEY, JSON.stringify(outlets));
-  notifySync('settings');
-}
+type PromoRow = {
+  id?: string;
+  title?: string | null;
+  subtitle?: string | null;
+  badge?: string | null;
+  image_url?: string | null;
+  valid_until?: string | null;
+  terms?: string | null;
+  is_active?: boolean | null;
+};
 
-export function loadCurrentOutletName(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const saved = localStorage.getItem(CURRENT_OUTLET_KEY);
-    if (!saved) return null;
-    // Follow outlet renames (e.g. HeadQuarters -> HQ Warehouse).
-    return OUTLET_RENAMES[saved] ?? saved;
-  } catch {
-    return null;
-  }
-}
+/** Baca semua poster bagi satu outlet dari server. */
+export async function fetchOutletPromos(outletName: string): Promise<PromoItem[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
 
-export function saveCurrentOutletName(outletName: string) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(CURRENT_OUTLET_KEY, outletName);
-  notifySync('settings');
-}
+  const { data, error } = await supabase
+    .from('kiosk_promos')
+    .select('id, title, subtitle, badge, image_url, valid_until, terms, is_active')
+    .eq('outlet_name', outletName)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
 
-/** Keluar dari paparan kiosk: buang pilihan outlet pada peranti ini. */
-export function clearCurrentOutletName() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(CURRENT_OUTLET_KEY);
-  notifySync('settings');
-}
-
-export function getOutlet(outletName: string): OutletConfig | null {
-  const outlets = loadOutlets();
-  return outlets[outletName] ?? null;
-}
-
-export function upsertOutlet(config: OutletConfig) {
-  const outlets = loadOutlets();
-  outlets[config.outletName] = config;
-  saveOutlets(outlets);
-}
-
-export function listOutletNames(): string[] {
-  const outlets = loadOutlets();
-  return Object.keys(outlets).sort();
-}
-
-/**
- * Nama outlet yang selamat dipaparkan di kiosk.
- * `Admin` disekat sebagai pertahanan tambahan walaupun server sudah menapis
- * `role = 'outlet'` — outlet role admin tidak sepatutnya muncul di kiosk.
- */
-function sanitizePublicOutletNames(names: unknown[]): string[] {
-  const unique = new Set<string>();
-  for (const value of names) {
-    if (typeof value !== 'string') continue;
-    const name = value.trim();
-    if (!name) continue;
-    if (name.toLowerCase() === 'admin') continue;
-    unique.add(name);
-  }
-  return Array.from(unique).sort();
-}
-
-/** Senarai outlet awam terakhir daripada server (cache selamat luar talian). */
-export function loadPublicOutletNames(): string[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(PUBLIC_OUTLETS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? sanitizePublicOutletNames(parsed) : [];
-  } catch {
+  if (error) {
+    console.warn('[emaspos] Gagal membaca poster promosi:', error.message);
     return [];
   }
+  if (!Array.isArray(data)) return [];
+
+  return (data as PromoRow[]).map((row, index) => ({
+    id: String(row.id ?? `promo-${index}`),
+    title: row.title ?? '',
+    subtitle: row.subtitle ?? '',
+    badge: row.badge ?? '',
+    imageUrl: row.image_url ?? '',
+    validUntil: row.valid_until ?? '',
+    terms: row.terms ?? '',
+    isActive: row.is_active !== false,
+  }));
 }
 
-function savePublicOutletNames(names: string[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(PUBLIC_OUTLETS_KEY, JSON.stringify(sanitizePublicOutletNames(names)));
-  } catch {
-    // Storage penuh / disekat — cache pilihan outlet tidak kritikal.
-  }
-}
+/** Ganti senarai poster sesuatu outlet di server (admin sahaja). */
+export async function pushOutletPromos(
+  outletName: string,
+  promos: PromoItem[],
+): Promise<void> {
+  const db = requireClient();
 
-// Legacy compatibility helpers for non-outlet aware flows
-export function loadPrices(): Record<GoldPurity, GoldPriceItem> {
-  const currentOutlet = loadCurrentOutletName();
-  if (currentOutlet) {
-    const outlet = getOutlet(currentOutlet);
-    if (outlet) return outlet.prices;
+  const rows = promos.map((promo, index) => ({
+    id: promo.id,
+    outlet_name: outletName,
+    title: promo.title,
+    subtitle: promo.subtitle,
+    badge: promo.badge,
+    image_url: promo.imageUrl,
+    valid_until: promo.validUntil,
+    terms: promo.terms,
+    is_active: promo.isActive,
+    sort_order: index,
+  }));
+
+  if (rows.length > 0) {
+    const { error } = await db
+      .from('kiosk_promos')
+      .upsert(rows, { onConflict: 'outlet_name,id' });
+    if (error) {
+      throw new Error(`Gagal menyimpan poster ke server: ${error.message}`);
+    }
   }
-  return DEFAULT_PRICES;
+
+  // Buang poster yang telah dipadam dari senarai.
+  const { data: existing, error: existingError } = await db
+    .from('kiosk_promos')
+    .select('id')
+    .eq('outlet_name', outletName);
+
+  if (existingError) {
+    throw new Error(`Gagal menyemak poster sedia ada: ${existingError.message}`);
+  }
+
+  const keep = new Set(promos.map((promo) => promo.id));
+  const removeIds = (existing ?? [])
+    .map((row) => (row as { id?: string }).id)
+    .filter((id): id is string => typeof id === 'string' && !keep.has(id));
+
+  if (removeIds.length > 0) {
+    const { error } = await db
+      .from('kiosk_promos')
+      .delete()
+      .eq('outlet_name', outletName)
+      .in('id', removeIds);
+    if (error) {
+      throw new Error(`Gagal memadam poster lama: ${error.message}`);
+    }
+  }
 }
 
 /**
- * Save prices for a specific outlet (defaults to the current one).
- *
- * Ini HANYA menulis cache localStorage. Penulisan ke Supabase dilakukan
- * secara eksplisit oleh `pushOutletPrices()` selepas admin disahkan.
+ * Muat naik gambar poster ke Supabase Storage dan pulangkan URL awam.
+ * Bucket `promo-posters` hanya boleh ditulis oleh admin.
  */
-export function savePrices(
-  prices: Record<GoldPurity, GoldPriceItem>,
-  outletName?: string
-) {
-  if (typeof window === 'undefined') return;
-  const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
-  const targetOutlet = outletName ?? currentOutlet;
-  const existing = getOutlet(targetOutlet) ?? DEFAULT_OUTLET;
-  const updated: OutletConfig = {
-    ...existing,
-    outletName: targetOutlet,
-    prices,
-    updatedAt: new Date().toISOString(),
-  };
-  upsertOutlet(updated);
-  if (targetOutlet === currentOutlet) {
-    notifySync('prices');
+export async function uploadPromoImage(blob: Blob, outletName: string): Promise<string> {
+  const db = requireClient();
+
+  const outletSlug =
+    outletName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'outlet';
+
+  const extension =
+    blob.type === 'image/webp' ? 'webp' : blob.type === 'image/png' ? 'png' : 'jpg';
+  const path = `${outletSlug}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+
+  const { error } = await db.storage.from('promo-posters').upload(path, blob, {
+    contentType: blob.type || 'image/jpeg',
+    cacheControl: '31536000',
+    upsert: false,
+  });
+
+  if (error) {
+    throw new Error(`Gagal memuat naik poster: ${error.message}`);
   }
+
+  const { data } = db.storage.from('promo-posters').getPublicUrl(path);
+  return data.publicUrl;
 }
 
-export function loadPromos(): PromoItem[] {
-  const currentOutlet = loadCurrentOutletName();
-  if (currentOutlet) {
-    const outlet = getOutlet(currentOutlet);
-    if (outlet) return outlet.promos;
+/** Padam fail poster dari Supabase Storage (jika URL milik bucket kita). */
+export async function deletePromoImage(imageUrl: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !imageUrl) return;
+
+  const marker = '/storage/v1/object/public/promo-posters/';
+  const index = imageUrl.indexOf(marker);
+  if (index === -1) return;
+
+  const path = decodeURIComponent(imageUrl.slice(index + marker.length));
+  await supabase.storage.from('promo-posters').remove([path]);
+}
+
+// ---------------------------------------------------------------------------
+// Tetapan kedai
+// ---------------------------------------------------------------------------
+
+type SettingsRow = {
+  shop_name?: string | null;
+  branch?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  tagline?: string | null;
+  currency?: string | null;
+};
+
+/** Baca tetapan outlet dari server; fallback kepada nilai lalai jika tiada. */
+export async function fetchOutletSettings(outletName: string): Promise<ShopSettings> {
+  const fallback: ShopSettings = { ...DEFAULT_SETTINGS, outletName };
+
+  if (!isSupabaseConfigured || !supabase) return fallback;
+
+  const { data, error } = await supabase
+    .from('kiosk_settings')
+    .select('shop_name, branch, phone, address, tagline, currency')
+    .eq('outlet_name', outletName)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca tetapan outlet:', error.message);
+    return fallback;
   }
-  return DEFAULT_PROMOS;
-}
+  if (!data) return fallback;
 
-export function savePromos(promos: PromoItem[]) {
-  if (typeof window === 'undefined') return;
-  const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
-  const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
-  const updated: OutletConfig = {
-    ...existing,
-    outletName: currentOutlet,
-    promos,
-    updatedAt: new Date().toISOString(),
-  };
-  upsertOutlet(updated);
-  notifySync('promos');
-}
-
-export function loadSettings(): ShopSettings {
-  const currentOutlet = loadCurrentOutletName();
-  if (currentOutlet) {
-    const outlet = getOutlet(currentOutlet);
-    if (outlet) return outlet.settings;
-  }
-  return DEFAULT_SETTINGS;
-}
-
-export function saveSettings(settings: ShopSettings) {
-  if (typeof window === 'undefined') return;
-  const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
-  const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
-  const updated: OutletConfig = {
-    ...existing,
-    outletName: currentOutlet,
-    settings,
-    updatedAt: new Date().toISOString(),
-  };
-  upsertOutlet(updated);
-  notifySync('settings');
-}
-
-export function loadHistory(): PriceHistoryEntry[] {
-  const currentOutlet = loadCurrentOutletName();
-  if (currentOutlet) {
-    const outlet = getOutlet(currentOutlet);
-    if (outlet) return outlet.history;
-  }
-  return DEFAULT_HISTORY;
-}
-
-export function saveHistory(history: PriceHistoryEntry[]) {
-  if (typeof window === 'undefined') return;
-  const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
-  const existing = getOutlet(currentOutlet) ?? DEFAULT_OUTLET;
-  const updated: OutletConfig = {
-    ...existing,
-    outletName: currentOutlet,
-    history: history.slice(0, 50), // keep latest 50
-    updatedAt: new Date().toISOString(),
-  };
-  upsertOutlet(updated);
-  notifySync('history');
-}
-
-function isGoldPurity(value: string): value is GoldPurity {
-  return value === '999' || value === '916' || value === '375';
-}
-
-function cloneDefaultPrices(): Record<GoldPurity, GoldPriceItem> {
+  const row = data as SettingsRow;
   return {
-    '999': { ...DEFAULT_PRICES['999'] },
-    '916': { ...DEFAULT_PRICES['916'] },
-    '375': { ...DEFAULT_PRICES['375'] },
+    shopName: row.shop_name ?? fallback.shopName,
+    outletName,
+    branch: row.branch ?? fallback.branch,
+    phone: row.phone ?? fallback.phone,
+    address: row.address ?? fallback.address,
+    tagline: row.tagline ?? fallback.tagline,
+    currency: row.currency ?? fallback.currency,
   };
 }
 
-/**
- * Create a local config for every outlet name that is not known yet.
- * Prices are taken from `pricesByOutlet` when available (remote data),
- * otherwise the default price list is used.
- */
-function seedMissingOutlets(
-  names: string[],
-  pricesByOutlet: Map<string, Record<GoldPurity, GoldPriceItem>> = new Map()
-) {
-  const outlets = loadOutlets();
-  let seeded = false;
-  for (const name of names) {
-    if (!outlets[name]) {
-      outlets[name] = {
-        outletName: name,
-        prices: pricesByOutlet.get(name) ?? cloneDefaultPrices(),
-        promos: DEFAULT_PROMOS,
-        settings: { ...DEFAULT_SETTINGS, outletName: name },
-        history: [],
-        updatedAt: new Date().toISOString(),
-      };
-      seeded = true;
-    }
+/** Simpan tetapan outlet ke server (admin sahaja). */
+export async function pushOutletSettings(
+  outletName: string,
+  settings: ShopSettings,
+): Promise<void> {
+  const db = requireClient();
+
+  const { error } = await db.from('kiosk_settings').upsert(
+    {
+      outlet_name: outletName,
+      shop_name: settings.shopName,
+      branch: settings.branch,
+      phone: settings.phone,
+      address: settings.address,
+      tagline: settings.tagline,
+      currency: settings.currency,
+    },
+    { onConflict: 'outlet_name' },
+  );
+
+  if (error) {
+    throw new Error(`Gagal menyimpan tetapan ke server: ${error.message}`);
   }
-  if (seeded) saveOutlets(outlets);
 }
 
-/**
- * Pull the active outlet list (and their latest prices) from Supabase, then
- * seed any outlet that is still missing locally.
- *
- * This lets the admin panel offer EVERY outlet when picking which outlet to
- * update prices for — even outlets that have never logged in on this device.
- * Returns the sorted outlet names confirmed by the server (role = 'outlet').
- * When Supabase is not configured (or unreachable) it falls back to the last
- * confirmed list, then to the local cache — never to admin-role rows.
- */
-export async function syncRemoteOutlets(): Promise<string[]> {
-  const fallback = (): string[] => {
-    const cached = loadPublicOutletNames();
-    return cached.length > 0 ? cached : sanitizePublicOutletNames(listOutletNames());
-  };
+// ---------------------------------------------------------------------------
+// Sejarah harga (ditulis oleh trigger server)
+// ---------------------------------------------------------------------------
 
+type HistoryRow = {
+  id?: number | string;
+  purity?: string;
+  old_sell?: number | string | null;
+  new_sell?: number | string | null;
+  old_buy?: number | string | null;
+  new_buy?: number | string | null;
+  note?: string | null;
+  changed_at?: string | null;
+};
+
+/** Baca sejarah perubahan harga sesuatu outlet (admin sahaja). */
+export async function fetchOutletHistory(
+  outletName: string,
+): Promise<PriceHistoryEntry[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase
+    .from('kiosk_price_history')
+    .select('id, purity, old_sell, new_sell, old_buy, new_buy, note, changed_at')
+    .eq('outlet_name', outletName)
+    .order('changed_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca sejarah harga:', error.message);
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+
+  return (data as HistoryRow[])
+    .filter((row) => typeof row.purity === 'string' && isGoldPurity(row.purity))
+    .map((row) => ({
+      id: String(row.id ?? ''),
+      timestamp: row.changed_at ?? new Date().toISOString(),
+      purity: row.purity as GoldPurity,
+      oldSellPrice: Number(row.old_sell ?? 0),
+      newSellPrice: Number(row.new_sell ?? 0),
+      oldBuyPrice: Number(row.old_buy ?? 0),
+      newBuyPrice: Number(row.new_buy ?? 0),
+      adminNote: row.note ?? undefined,
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// Realtime — hanya isyarat, pemanggil mesti fetch semula dari server
+// ---------------------------------------------------------------------------
+
+export function subscribeToOutletChanges(
+  outletName: string,
+  onChange: () => void,
+): () => void {
   if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
-    return fallback();
+    return () => {};
   }
 
-  // Public outlet names are exposed through a SECURITY DEFINER function so the
-  // kiosk never needs SELECT access to `kiosk_outlets` (which holds `code`).
-  // The function only returns rows with role = 'outlet'.
-  let names: string[] = [];
+  const matchesOutlet = (payload: {
+    new?: Record<string, unknown> | null;
+    old?: Record<string, unknown> | null;
+  }) => {
+    const row = payload.new ?? payload.old;
+    return !row || row.outlet_name === outletName;
+  };
 
-  const { data: outletRows, error: outletError } = await supabase.rpc('kiosk_outlet_names');
+  const channel = supabase
+    .channel(`kiosk_outlet:${outletName}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_prices' },
+      (payload) => {
+        if (matchesOutlet(payload)) onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_promos' },
+      (payload) => {
+        if (matchesOutlet(payload)) onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_settings' },
+      (payload) => {
+        if (matchesOutlet(payload)) onChange();
+      },
+    )
+    .subscribe();
 
-  if (outletError || !Array.isArray(outletRows)) {
-    console.warn('[emaspos] Failed to load outlets from Supabase:', outletError?.message);
-  } else {
-    names = sanitizePublicOutletNames(
-      outletRows.map((row) => (row as { name?: string }).name),
-    );
-  }
-
-  // Latest prices per outlet — the kiosk_prices table is the source of truth.
-  const { data: priceRows } = await supabase
-    .from('kiosk_prices')
-    .select('outlet_name, purity, sell_price, buy_price');
-
-  // Fallback: if the RPC is unavailable or empty, derive public outlet names
-  // from the price rows (anon has read-only access to kiosk_prices).
-  if (names.length === 0 && Array.isArray(priceRows)) {
-    names = sanitizePublicOutletNames(
-      priceRows.map((row) => (row as { outlet_name?: string }).outlet_name),
-    );
-  }
-
-  if (names.length === 0) {
-    return fallback();
-  }
-
-  const remotePrices = new Map<string, Record<GoldPurity, GoldPriceItem>>();
-  if (Array.isArray(priceRows)) {
-    for (const row of priceRows as Array<{
-      outlet_name?: string;
-      purity?: string;
-      sell_price?: number | string;
-      buy_price?: number | string;
-    }>) {
-      const outletName = typeof row.outlet_name === 'string' ? row.outlet_name : '';
-      const purity = typeof row.purity === 'string' ? row.purity : '';
-      if (!outletName || !isGoldPurity(purity)) continue;
-
-      const base = remotePrices.get(outletName) ?? cloneDefaultPrices();
-      const sellPrice = Number(row.sell_price);
-      const buyPrice = Number(row.buy_price);
-      remotePrices.set(outletName, {
-        ...base,
-        [purity]: {
-          ...base[purity],
-          sellPrice:
-            Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : base[purity].sellPrice,
-          buyPrice:
-            Number.isFinite(buyPrice) && buyPrice > 0 ? buyPrice : base[purity].buyPrice,
-          updatedAt: new Date().toISOString(),
-        },
-      });
+  return () => {
+    try {
+      void supabase?.removeChannel(channel);
+    } catch {
+      // ignore
     }
-  }
-
-  savePublicOutletNames(names);
-  seedMissingOutlets(names, remotePrices);
-  return names;
+  };
 }

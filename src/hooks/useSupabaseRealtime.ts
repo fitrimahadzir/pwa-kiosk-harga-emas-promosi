@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { subscribeToOutletPrices } from '../utils/storage';
+import { subscribeToOutletChanges } from '../utils/storage';
 
 /**
- * Langgan perubahan harga Supabase untuk satu outlet.
+ * Langgan perubahan Supabase (harga, poster, tetapan) untuk satu outlet.
  *
  * Mesej realtime hanya dijadikan ISYARAT. Pemanggil (`App`) mesti fetch
- * semula harga daripada jadual — payload tidak dipercayai dan tidak pernah
- * ditulis terus ke localStorage.
+ * semula data daripada jadual — payload tidak dipercayai dan tidak pernah
+ * ditulis terus ke mana-mana cache peranti.
  */
 export function useSupabaseRealtime(
   outletName: string | null,
@@ -20,7 +20,7 @@ export function useSupabaseRealtime(
 
   useEffect(() => {
     if (!outletName) return;
-    const unsubscribe = subscribeToOutletPrices(outletName, () => {
+    const unsubscribe = subscribeToOutletChanges(outletName, () => {
       callbackRef.current();
     });
     return unsubscribe;

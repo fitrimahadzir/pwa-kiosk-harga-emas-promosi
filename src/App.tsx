@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   GoldPriceItem,
   GoldPurity,
@@ -6,32 +6,23 @@ import {
   PriceHistoryEntry,
   ShopSettings,
   QuotationResult,
-  OutletConfig,
 } from './types/gold';
 import {
-  loadPrices,
-  savePrices,
-  loadPromos,
-  savePromos,
-  loadSettings,
-  saveSettings,
-  loadHistory,
-  saveHistory,
-  subscribeToSync,
   DEFAULT_PRICES,
-  DEFAULT_PROMOS,
   DEFAULT_SETTINGS,
-  DEFAULT_HISTORY,
-  DEFAULT_OUTLET,
   loadCurrentOutletName,
   saveCurrentOutletName,
   clearCurrentOutletName,
-  getOutlet,
-  upsertOutlet,
-  loadPublicOutletNames,
-  syncRemoteOutlets,
+  purgeLegacyLocalStorage,
+  fetchOutletNames,
+  fetchAllOutletPrices,
   fetchOutletPrices,
   pushOutletPrices,
+  fetchOutletPromos,
+  pushOutletPromos,
+  fetchOutletSettings,
+  pushOutletSettings,
+  fetchOutletHistory,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { Header } from './components/Header';
@@ -84,16 +75,19 @@ export default function App() {
   const [currentOutletName, setCurrentOutletName] = useState<string | null>(() =>
     loadCurrentOutletName(),
   );
-  const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(loadPrices);
-  const [promos, setPromos] = useState<PromoItem[]>(loadPromos);
-  const [settings, setSettings] = useState<ShopSettings>(loadSettings);
-  const [history, setHistory] = useState<PriceHistoryEntry[]>(loadHistory);
+  const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(DEFAULT_PRICES);
+  const [promos, setPromos] = useState<PromoItem[]>([]);
+  const [settings, setSettings] = useState<ShopSettings>(DEFAULT_SETTINGS);
+  const [history, setHistory] = useState<PriceHistoryEntry[]>([]);
 
   // All outlets shown in the pickers (public names only — role = 'outlet').
-  const [availableOutlets, setAvailableOutlets] = useState<string[]>(() =>
-    loadPublicOutletNames(),
-  );
+  const [availableOutlets, setAvailableOutlets] = useState<string[]>([]);
   const [outletsLoading, setOutletsLoading] = useState<boolean>(false);
+
+  // Per-outlet price snapshot for the admin overview table (server data).
+  const [outletPrices, setOutletPrices] = useState<
+    Record<string, Record<GoldPurity, GoldPriceItem>>
+  >({});
 
   // Active calculator purity selection
   const [selectedPurity, setSelectedPurity] = useState<GoldPurity>('916');
@@ -130,6 +124,11 @@ export default function App() {
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Buang cache localStorage lama sekali — semua data kini dari Supabase.
+  useEffect(() => {
+    purgeLegacyLocalStorage();
   }, []);
 
   // Verify any persisted Supabase Auth session once, on boot.
@@ -185,41 +184,21 @@ export default function App() {
   const refreshOutlets = useCallback(async () => {
     setOutletsLoading(true);
     try {
-      const names = await syncRemoteOutlets();
-      setAvailableOutlets(names);
+      setAvailableOutlets(await fetchOutletNames());
     } catch {
-      // Offline / Supabase not configured — keep the local outlet list.
+      // Offline / Supabase tidak dikonfigurasi — tiada cache peranti.
+      setAvailableOutlets([]);
     } finally {
       setOutletsLoading(false);
     }
   }, []);
 
-  // Public outlet names + latest remote prices (read-only, works for anon).
   useEffect(() => {
     void refreshOutlets();
   }, [refreshOutlets]);
 
-  // Multi-tab sync via BroadcastChannel (local cache only).
-  useEffect(() => {
-    const unsubscribe = subscribeToSync((type) => {
-      if (!currentOutletName) return;
-      const outlet = getOutlet(currentOutletName);
-      if (!outlet) return;
-
-      if (type === 'prices') setPrices(outlet.prices);
-      if (type === 'promos') setPromos(outlet.promos);
-      if (type === 'settings') {
-        setSettings(outlet.settings);
-        const publicNames = loadPublicOutletNames();
-        if (publicNames.length > 0) setAvailableOutlets(publicNames);
-      }
-      if (type === 'history') setHistory(outlet.history);
-    });
-    return unsubscribe;
-  }, [currentOutletName]);
-
   /**
-   * Fetch the authoritative prices from Supabase for the current outlet.
+   * Fetch the authoritative prices for the current outlet from Supabase.
    * Realtime payloads are never trusted — they only trigger this refetch.
    */
   const refreshPrices = useCallback(async () => {
@@ -229,112 +208,106 @@ export default function App() {
     const remote = await fetchOutletPrices(outletName);
     if (!remote) return;
 
-    const local = getOutlet(outletName)?.prices;
-    const merged = mergeRemotePrices(remote, local);
-
-    savePrices(merged, outletName);
-    setPrices(merged);
+    setPrices((previous) => mergeRemotePrices(remote, previous));
   }, [currentOutletName]);
 
-  // Seed the selected outlet locally, then hydrate from the server.
+  const refreshPromosAndSettings = useCallback(async () => {
+    const outletName = currentOutletName;
+    if (!outletName) return;
+
+    const [remotePromos, remoteSettings] = await Promise.all([
+      fetchOutletPromos(outletName),
+      fetchOutletSettings(outletName),
+    ]);
+
+    setPromos(remotePromos);
+    setSettings(remoteSettings);
+  }, [currentOutletName]);
+
+  const refreshHistory = useCallback(async () => {
+    if (!currentOutletName || !adminSession) {
+      setHistory([]);
+      return;
+    }
+    setHistory(await fetchOutletHistory(currentOutletName));
+  }, [currentOutletName, adminSession]);
+
+  const refreshAllPrices = useCallback(async () => {
+    setOutletPrices(await fetchAllOutletPrices());
+  }, []);
+
+  const refreshOutletData = useCallback(async () => {
+    await Promise.all([refreshPrices(), refreshPromosAndSettings()]);
+  }, [refreshPrices, refreshPromosAndSettings]);
+
+  // Hydrate the selected outlet from the server (no local cache).
   useEffect(() => {
     if (!currentOutletName) {
       setPrices(DEFAULT_PRICES);
-      setPromos(DEFAULT_PROMOS);
+      setPromos([]);
       setSettings(DEFAULT_SETTINGS);
-      setHistory(DEFAULT_HISTORY);
+      setHistory([]);
       return;
     }
 
-    const outlet = getOutlet(currentOutletName);
-    setPrices(outlet?.prices ?? DEFAULT_PRICES);
-    setPromos(outlet?.promos ?? DEFAULT_PROMOS);
-    setSettings(outlet?.settings ?? { ...DEFAULT_SETTINGS, outletName: currentOutletName });
-    setHistory(outlet?.history ?? DEFAULT_HISTORY);
-
-    void refreshPrices();
-  }, [currentOutletName, refreshPrices]);
+    setSettings((previous) => ({ ...previous, outletName: currentOutletName }));
+    void refreshOutletData();
+    void refreshHistory();
+  }, [currentOutletName, refreshOutletData, refreshHistory]);
 
   // Realtime refetch + slow poll (covers kiosks that lose the websocket).
   // Skipped while the admin editor is open so remote refreshes never wipe
   // unsaved draft edits.
   useSupabaseRealtime(route.admin ? null : currentOutletName, () => {
-    void refreshPrices();
+    void refreshOutletData();
   });
 
   useEffect(() => {
     if (!currentOutletName || route.admin) return;
     const timer = setInterval(() => {
-      void refreshPrices();
+      void refreshOutletData();
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [currentOutletName, refreshPrices, route.admin]);
+  }, [currentOutletName, refreshOutletData, route.admin]);
 
-  // Per-outlet price snapshot for the admin overview table.
-  const outletPrices = useMemo(() => {
-    const map: Record<string, Record<GoldPurity, GoldPriceItem>> = {};
-    const names = new Set(availableOutlets);
-    if (currentOutletName) names.add(currentOutletName);
-    for (const name of names) {
-      const outlet = getOutlet(name);
-      if (outlet) map[name] = outlet.prices;
-    }
-    return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableOutlets, prices, promos, settings, history, currentOutletName]);
-
-  /** Create the local cache entry for an outlet if it does not exist yet. */
-  const ensureOutlet = useCallback((outletName: string) => {
-    if (getOutlet(outletName)) return;
-    const config: OutletConfig = {
-      outletName,
-      prices: DEFAULT_PRICES,
-      promos: DEFAULT_PROMOS,
-      settings: { ...DEFAULT_SETTINGS, outletName },
-      history: DEFAULT_HISTORY,
-      updatedAt: new Date().toISOString(),
-    };
-    upsertOutlet(config);
-  }, []);
+  // Admin overview table reads every outlet's prices from the server.
+  useEffect(() => {
+    if (!route.admin) return;
+    void refreshAllPrices();
+  }, [route.admin, currentOutletName, refreshAllPrices]);
 
   /** Enter kiosk mode for an outlet (no credentials required). */
-  const enterOutlet = useCallback(
-    (name: string) => {
-      const outletName = name.trim();
-      if (!outletName) return;
+  const enterOutlet = useCallback((name: string) => {
+    const outletName = name.trim();
+    if (!outletName) return;
 
-      ensureOutlet(outletName);
-      saveCurrentOutletName(outletName);
-      setCurrentOutletName(outletName);
-      setLoginError('');
-      setActiveQuotation(null);
-      setPage('home');
-      setRoute({ admin: false, page: 'home' });
-      window.location.hash = '/';
-    },
-    [ensureOutlet],
-  );
+    saveCurrentOutletName(outletName);
+    setCurrentOutletName(outletName);
+    setLoginError('');
+    setActiveQuotation(null);
+    setPage('home');
+    setRoute({ admin: false, page: 'home' });
+    window.location.hash = '/';
+  }, []);
 
   /** Switch the active outlet (used by the admin price editor too). */
   const selectOutlet = useCallback(
     (outletName: string) => {
       if (!outletName || outletName === currentOutletName) return;
-      ensureOutlet(outletName);
       saveCurrentOutletName(outletName);
       setCurrentOutletName(outletName);
     },
-    [currentOutletName, ensureOutlet],
+    [currentOutletName],
   );
 
   // A persisted admin session opened directly on #/admin may have no outlet
   // selected yet — pick a valid one so the price editor is always usable.
   useEffect(() => {
     if (!route.admin || !adminSession || currentOutletName) return;
-    const fallback = availableOutlets[0] ?? DEFAULT_OUTLET.outletName;
-    ensureOutlet(fallback);
+    const fallback = availableOutlets[0] ?? DEFAULT_SETTINGS.outletName;
     saveCurrentOutletName(fallback);
     setCurrentOutletName(fallback);
-  }, [route.admin, adminSession, currentOutletName, availableOutlets, ensureOutlet]);
+  }, [route.admin, adminSession, currentOutletName, availableOutlets]);
 
   /** Leave kiosk mode and return to the outlet picker. */
   const handleExitOutlet = () => {
@@ -367,18 +340,15 @@ export default function App() {
       // Make sure the admin editor always has an outlet selected.
       let names = availableOutlets;
       try {
-        const remoteNames = await syncRemoteOutlets();
-        if (remoteNames.length > 0) {
-          names = remoteNames;
-          setAvailableOutlets(remoteNames);
-        }
+        const remoteNames = await fetchOutletNames();
+        names = remoteNames;
+        setAvailableOutlets(remoteNames);
       } catch {
-        // Fall back to the locally known outlets.
+        // Kekalkan senarai yang sudah ada dalam memori.
       }
 
       if (!currentOutletName) {
-        const fallback = names[0] ?? DEFAULT_OUTLET.outletName;
-        ensureOutlet(fallback);
+        const fallback = names[0] ?? DEFAULT_SETTINGS.outletName;
         saveCurrentOutletName(fallback);
         setCurrentOutletName(fallback);
       }
@@ -447,9 +417,8 @@ export default function App() {
     }
 
     const timestamp = new Date().toISOString();
-    const previous = getOutlet(outletName)?.prices ?? prices;
+    const previous = prices;
     const next = {} as Record<GoldPurity, GoldPriceItem>;
-    const newHistoryEntries: PriceHistoryEntry[] = [];
 
     for (const purity of PURITIES) {
       const oldItem = previous[purity];
@@ -464,68 +433,62 @@ export default function App() {
         previousSellPrice: changed && oldItem ? oldItem.sellPrice : newItem.previousSellPrice,
         updatedAt: timestamp,
       };
-
-      if (changed && oldItem) {
-        newHistoryEntries.push({
-          id: `hist-${Date.now()}-${purity}`,
-          timestamp,
-          purity,
-          oldSellPrice: oldItem.sellPrice,
-          newSellPrice: newItem.sellPrice,
-          oldBuyPrice: oldItem.buyPrice,
-          newBuyPrice: newItem.buyPrice,
-          adminNote: note,
-        });
-      }
     }
 
     // Throws if RLS rejects the write (e.g. session expired / not an admin).
-    await pushOutletPrices(outletName, next);
+    await pushOutletPrices(outletName, next, note);
 
-    savePrices(next, outletName);
     setPrices(next);
+    await Promise.all([refreshPrices(), refreshHistory(), refreshAllPrices()]);
+  };
 
-    if (newHistoryEntries.length > 0) {
-      const updatedHistory = [...newHistoryEntries, ...history].slice(0, 50);
-      setHistory(updatedHistory);
-      saveHistory(updatedHistory);
+  // Poster promosi disimpan di Supabase (termasuk fail gambar di Storage).
+  const handleUpdatePromos = async (newPromos: PromoItem[]): Promise<void> => {
+    const outletName = currentOutletName;
+    if (!outletName) throw new Error('Tiada outlet dipilih.');
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
     }
+
+    await pushOutletPromos(outletName, newPromos);
+    setPromos(await fetchOutletPromos(outletName));
   };
 
-  // Update Promos Handler (local cache — promos are not stored server-side).
-  const handleUpdatePromos = (newPromos: PromoItem[]) => {
-    setPromos(newPromos);
-    savePromos(newPromos);
+  // Tetapan kedai disimpan di Supabase.
+  const handleUpdateSettings = async (newSettings: ShopSettings): Promise<void> => {
+    const outletName = currentOutletName;
+    if (!outletName) throw new Error('Tiada outlet dipilih.');
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
+    }
+
+    await pushOutletSettings(outletName, newSettings);
+    setSettings(await fetchOutletSettings(outletName));
   };
 
-  // Update Settings Handler (local cache — kiosk display settings).
-  const handleUpdateSettings = (newSettings: ShopSettings) => {
-    setSettings(newSettings);
-    saveSettings(newSettings);
-  };
-
-  // Reset to Defaults Handler (admin only for the server price write).
+  // Reset harga + tetapan ke nilai asal (poster promosi tidak dipadam).
   const handleResetDefaults = async (): Promise<void> => {
     const outletName = currentOutletName;
     if (!outletName) return;
-
-    if (adminSession) {
-      await pushOutletPrices(outletName, DEFAULT_PRICES);
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
     }
 
-    const config: OutletConfig = {
-      outletName,
-      prices: DEFAULT_PRICES,
-      promos: DEFAULT_PROMOS,
-      settings: { ...DEFAULT_SETTINGS, outletName },
-      history: DEFAULT_HISTORY,
-      updatedAt: new Date().toISOString(),
-    };
-    upsertOutlet(config);
+    const defaults = { ...DEFAULT_SETTINGS, outletName };
+
+    await Promise.all([
+      pushOutletPrices(outletName, DEFAULT_PRICES, 'Pulihkan harga asal'),
+      pushOutletSettings(outletName, defaults),
+    ]);
+
     setPrices(DEFAULT_PRICES);
-    setPromos(DEFAULT_PROMOS);
-    setSettings(config.settings);
-    setHistory(DEFAULT_HISTORY);
+    setSettings(defaults);
+    await Promise.all([
+      refreshPrices(),
+      refreshPromosAndSettings(),
+      refreshHistory(),
+      refreshAllPrices(),
+    ]);
   };
 
   // ---- Rendering gates -----------------------------------------------------
@@ -569,7 +532,7 @@ export default function App() {
           onClose={() => {
             void handleAdminLogout();
           }}
-          currentOutletName={currentOutletName ?? DEFAULT_OUTLET.outletName}
+          currentOutletName={currentOutletName ?? DEFAULT_SETTINGS.outletName}
           adminLabel={adminSession.email}
           onSelectOutlet={selectOutlet}
           availableOutlets={availableOutlets}
