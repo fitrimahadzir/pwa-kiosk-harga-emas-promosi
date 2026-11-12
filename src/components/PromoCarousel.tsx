@@ -65,7 +65,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
 
   if (activePromos.length === 0) {
     return (
-      <div className="gr-card-light p-6 h-full flex flex-col items-center justify-center text-center">
+      <div className="gr-card-light p-6 h-full w-full flex flex-col items-center justify-center text-center">
         <img
           src="/images/icon.png"
           alt="Gold Reserve"
@@ -82,21 +82,21 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   return (
     <>
       <div 
-        className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/4] portrait:sm:aspect-[3/2] mx-auto landscape:lg:mx-0 group"
+        className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/1] portrait:sm:aspect-[3/1] mx-auto landscape:mx-0 landscape:h-full landscape:w-full landscape:max-w-none landscape:aspect-auto group"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
         {/* Main Banner Image Container (Nisbah 3:4) */}
         <div 
           onClick={() => setZoomedPromo(current)}
-          className="relative w-full h-full overflow-hidden cursor-pointer aspect-[3/4]"
+          className="relative w-full h-full overflow-hidden cursor-pointer aspect-[3/1]"
           title="Tekan untuk paparan poster penuh & maklumat lanjut (Nisbah 3:4)"
         >
           {/* Mobile portrait: single 3:4 poster */}
           <img
             src={current.imageUrl}
             alt="Poster promosi"
-            className="w-full h-full object-cover aspect-[3/4] transition-transform duration-700 ease-out group-hover:scale-105 portrait:sm:hidden"
+            className="w-full h-full object-cover aspect-[3/1] transition-transform duration-700 ease-out group-hover:scale-105 portrait:sm:hidden"
             loading="lazy"
           />
 
@@ -113,7 +113,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
                 <img
                   src={current.imageUrl}
                   alt={slot === 0 ? 'Poster promosi' : ''}
-                  className="w-full h-full object-cover aspect-[3/4] transition-transform duration-700 ease-out group-hover:scale-105"
+                  className="w-full h-full object-cover aspect-[3/1] transition-transform duration-700 ease-out group-hover:scale-105"
                   loading="lazy"
                 />
               </div>
@@ -216,7 +216,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
               <img
                 src={zoomedPromo.imageUrl}
                 alt="Poster promosi"
-                className="max-h-[72vh] w-auto aspect-[3/4] object-contain rounded-2xl border border-[#d4a13a]/40 shadow-2xl"
+                className="max-h-[72vh] w-auto aspect-[3/1] object-contain rounded-2xl border border-[#d4a13a]/40 shadow-2xl"
               />
             </div>
 

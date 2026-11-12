@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GoldPriceItem,
   GoldPurity,
@@ -25,6 +25,7 @@ import {
   fetchOutletHistory,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
+import { useLandscapeOrientation, usePromoStageHeight } from './hooks/usePromoStageHeight';
 import { Header } from './components/Header';
 import { GoldPriceBoard } from './components/GoldPriceBoard';
 import { PromoCarousel } from './components/PromoCarousel';
@@ -106,6 +107,17 @@ export default function App() {
   const [loginError, setLoginError] = useState<string>('');
 
   const isOnline = useOnlineStatus();
+
+  // Stage kiosk: dalam paparan melintang, tinggi poster promosi diselaraskan
+  // dengan tinggi papan harga + banner 3:1 + kalkulator.
+  const stageLeftRef = useRef<HTMLDivElement | null>(null);
+  const stageRightRef = useRef<HTMLDivElement | null>(null);
+  const isLandscape = useLandscapeOrientation();
+  usePromoStageHeight(
+    stageLeftRef,
+    stageRightRef,
+    isLandscape && !route.admin && page === 'home' && Boolean(currentOutletName),
+  );
 
   const navigateTo = (nextPage: Page) => {
     window.location.hash = nextPage === 'calculator' ? '/kalkulator' : '/';
@@ -593,13 +605,16 @@ export default function App() {
         </main>
       ) : (
         /* Main price board page */
-        <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:lg:flex">
+        <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-start landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
           {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
               In portrait these become direct grid items so the poster can sit
               between them, while landscape keeps the original side-by-side layout.
-              In landscape it flexes to fill all remaining width, so the poster
-              keeps its fixed 3:4 size. */}
-          <div className="contents landscape:lg:min-w-0 landscape:lg:flex-1 landscape:lg:flex landscape:lg:flex-col landscape:lg:gap-4 landscape:lg:justify-between">
+              In landscape the column's natural height (price board + 3:1 banner
+              + calculator) becomes the reference height for the promo poster. */}
+          <div
+            ref={stageLeftRef}
+            className="contents landscape:order-1 landscape:flex landscape:min-w-0 landscape:flex-1 landscape:flex-col landscape:justify-start landscape:gap-4 landscape:sm:gap-5"
+          >
             {/* Section: Live Gold Price Board (999, 916, 375) */}
             <div className="order-1">
               <GoldPriceBoard
@@ -649,11 +664,15 @@ export default function App() {
 
           {/* RIGHT COLUMN: Promotional Posters Carousel & Highlights.
               Portrait: appears between the price board and the calculator,
-              stretched to the full app width. Landscape: fixed 430px poster on
-              the right, aligned with the header's logout button. */}
-          <div className="order-2 flex w-full flex-col items-center justify-between gap-3 landscape:order-4 landscape:lg:w-[430px] landscape:lg:shrink-0 landscape:lg:items-end">
-            {/* Promo Posters Carousel (3:4 single / 3:2 dual in tablet portrait) */}
-            <div className="w-full flex-1 flex items-center justify-center landscape:lg:justify-end">
+              stretched to the full app width. Landscape: the poster keeps its
+              3:4 ratio and its height is synced with the left column, so the
+              price board, banner and calculator always end at the same line. */}
+          <div
+            ref={stageRightRef}
+            className="order-2 flex w-full flex-col items-center justify-between gap-3 landscape:order-2 landscape:w-auto landscape:flex-none landscape:items-stretch"
+          >
+            {/* Promo Posters Carousel (3:4 — height synced in landscape) */}
+            <div className="w-full flex-1 flex items-center justify-center landscape:h-full landscape:justify-center">
               <PromoCarousel
                 promos={promos}
                 shopName={settings.shopName}

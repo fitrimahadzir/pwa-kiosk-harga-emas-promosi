@@ -58,12 +58,14 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
 
       {/* Calculator + live price reference */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
-        <SalesCalculator
-          prices={prices}
-          selectedPurity={selectedPurity}
-          onPurityChange={onPurityChange}
-          onGenerateQuote={onGenerateQuote}
-        />
+        <div className="aspect-[3/1] rounded-2xl overflow-hidden bg-cream border border-line/20">
+          <SalesCalculator
+            prices={prices}
+            selectedPurity={selectedPurity}
+            onPurityChange={onPurityChange}
+            onGenerateQuote={onGenerateQuote}
+          />
+        </div>
 
         <aside className="gr-card-light p-4">
           <h2 className="flex items-center gap-1.5 font-serif text-sm font-bold tracking-wide text-maroon-deep">
