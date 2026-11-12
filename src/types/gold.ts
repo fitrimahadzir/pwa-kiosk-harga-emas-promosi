@@ -13,12 +13,7 @@ export interface GoldPriceItem {
 
 export interface PromoItem {
   id: string;
-  title: string;
-  subtitle: string;
-  badge: string;
   imageUrl: string;
-  validUntil: string;
-  terms: string;
   isActive: boolean;
 }
 

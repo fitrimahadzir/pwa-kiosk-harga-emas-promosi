@@ -3,10 +3,7 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Maximize2, 
-  X, 
-  Calendar, 
-  Share2,
-  Check
+  X
 } from 'lucide-react';
 import { PromoItem } from '../types/gold';
 
@@ -25,7 +22,6 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [zoomedPromo, setZoomedPromo] = useState<PromoItem | null>(null);
   const [isPaused, setIsPaused] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // Auto-play timer
   useEffect(() => {
@@ -57,16 +53,13 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
     setCurrentIndex((prev) => (prev - 1 + activePromos.length) % activePromos.length);
   };
 
-  const handleSharePromo = (promo: PromoItem) => {
-    const lines = [`*${promo.title}*`];
-    if (promo.subtitle) lines.push(promo.subtitle);
-    if (promo.validUntil) lines.push(`Sah Sehingga: ${promo.validUntil}`);
+  const handleSharePromo = () => {
+    const lines = ['Promosi terkini di kedai emas kami'];
     if (shopName) lines.push(`Di ${shopName}`);
+    if (shopPhone) lines.push(`Hubungi ${shopPhone}`);
     const text = lines.join('\n');
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      void navigator.clipboard.writeText(text);
     }
   };
 
@@ -102,7 +95,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
           {/* Mobile portrait: single 3:4 poster */}
           <img
             src={current.imageUrl}
-            alt={current.title}
+            alt="Poster promosi"
             className="w-full h-full object-cover aspect-[3/4] transition-transform duration-700 ease-out group-hover:scale-105 portrait:sm:hidden"
             loading="lazy"
           />
@@ -119,7 +112,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
               >
                 <img
                   src={current.imageUrl}
-                  alt={slot === 0 ? current.title : ''}
+                  alt={slot === 0 ? 'Poster promosi' : ''}
                   className="w-full h-full object-cover aspect-[3/4] transition-transform duration-700 ease-out group-hover:scale-105"
                   loading="lazy"
                 />
@@ -222,67 +215,28 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
             <div className="w-full bg-black/60 flex items-center justify-center p-4 overflow-hidden">
               <img
                 src={zoomedPromo.imageUrl}
-                alt={zoomedPromo.title}
-                className="max-h-[58vh] w-auto aspect-[3/4] object-contain rounded-2xl border border-[#d4a13a]/40 shadow-2xl"
+                alt="Poster promosi"
+                className="max-h-[72vh] w-auto aspect-[3/4] object-contain rounded-2xl border border-[#d4a13a]/40 shadow-2xl"
               />
             </div>
 
-            {/* Poster Details in Modal */}
-            <div className="p-5 sm:p-6 overflow-y-auto">
-              {(zoomedPromo.badge || zoomedPromo.validUntil) && (
-                <div className="flex items-center gap-2 mb-2">
-                  {zoomedPromo.badge && (
-                    <span className="px-3 py-1 bg-[#2a0404] text-[#d4a13a] border border-[#d4a13a]/40 rounded-full text-[11px] font-bold uppercase tracking-wider font-mono">
-                      {zoomedPromo.badge}
-                    </span>
-                  )}
-                  {zoomedPromo.validUntil && (
-                    <span className="text-xs text-[#d8be8a] flex items-center gap-1">
-                      <Calendar size={13} />
-                      Sah hingga: {zoomedPromo.validUntil}
-                    </span>
-                  )}
-                </div>
-              )}
+            {/* Action buttons */}
+            <div className="p-5 sm:p-6 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleSharePromo}
+                className="px-4 py-2.5 rounded-xl bg-[#2a0404] border border-[#d4a13a]/40 text-[#ece2d0] text-xs font-semibold hover:border-[#d4a13a] transition"
+              >
+                Salin Maklumat Kedai
+              </button>
 
-              <h2 className="text-xl sm:text-2xl font-bold text-[#ece2d0] font-serif">
-                {zoomedPromo.title}
-              </h2>
-              {zoomedPromo.subtitle && (
-                <p className="text-sm text-[#d8be8a] mt-1 font-medium">
-                  {zoomedPromo.subtitle}
-                </p>
-              )}
-
-              {/* Terms and conditions */}
-              <div className="mt-4 bg-[#2a0404]/90 p-3.5 rounded-xl border border-[#d4a13a]/30 text-xs">
-                <h4 className="font-bold text-[#d4a13a] mb-1 uppercase tracking-wider text-[11px] font-mono">
-                  Terma & Syarat Promosi:
-                </h4>
-                <p className="text-[#ece2d0]/90 leading-relaxed">
-                  {zoomedPromo.terms || 'Tertakluk kepada stok semasa dan terma kedai emas. Sila rujuk jurujual bertugas.'}
-                </p>
-              </div>
-
-              {/* Action buttons */}
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => handleSharePromo(zoomedPromo)}
-                  className="px-4 py-2.5 rounded-xl bg-[#2a0404] border border-[#d4a13a]/40 text-[#ece2d0] text-xs font-semibold hover:border-[#d4a13a] transition flex items-center gap-2"
-                >
-                  {copied ? <Check size={14} className="text-emerald-400" /> : <Share2 size={14} />}
-                  <span>{copied ? 'Disalin ke Papan Keratan' : 'Salin Maklumat Promosi'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setZoomedPromo(null)}
-                  className="px-6 py-2.5 rounded-xl bg-[#d4a13a] text-[#3b0707] font-bold text-xs shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] hover:bg-[#d8be8a] transition"
-                >
-                  Kembali ke Kaunter
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setZoomedPromo(null)}
+                className="px-6 py-2.5 rounded-xl bg-[#d4a13a] text-[#3b0707] font-bold text-xs shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] hover:bg-[#d8be8a] transition"
+              >
+                Kembali ke Kaunter
+              </button>
             </div>
 
           </div>

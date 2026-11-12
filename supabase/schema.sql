@@ -44,21 +44,28 @@ create table if not exists public.kiosk_prices (
   primary key (outlet_name, purity)
 );
 
--- Poster promosi — satu baris bagi setiap poster, gambar disimpan di Storage.
+-- Poster promosi GLOBAL — satu set poster yang sama untuk semua outlet.
+-- Struktur lama (mengikut outlet) akan diganti secara automatik.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'kiosk_promos'
+      and column_name = 'outlet_name'
+  ) then
+    drop table public.kiosk_promos;
+  end if;
+end $$;
+
 create table if not exists public.kiosk_promos (
-  id text not null,
-  outlet_name text not null,
-  title text not null default '',
-  subtitle text not null default '',
-  badge text not null default '',
+  id text primary key,
   image_url text not null default '',
-  valid_until text not null default '',
-  terms text not null default '',
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  primary key (outlet_name, id)
+  updated_at timestamptz not null default now()
 );
 
 -- Tetapan paparan / resit bagi setiap outlet.
@@ -109,12 +116,7 @@ alter table public.kiosk_prices
   add column if not exists note text not null default '';
 
 alter table public.kiosk_promos
-  add column if not exists title text not null default '',
-  add column if not exists subtitle text not null default '',
-  add column if not exists badge text not null default '',
   add column if not exists image_url text not null default '',
-  add column if not exists valid_until text not null default '',
-  add column if not exists terms text not null default '',
   add column if not exists is_active boolean not null default true,
   add column if not exists sort_order integer not null default 0,
   add column if not exists created_at timestamptz not null default now(),

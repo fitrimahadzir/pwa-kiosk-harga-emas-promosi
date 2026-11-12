@@ -52,8 +52,6 @@ export const DEFAULT_PRICES: Record<GoldPurity, GoldPriceItem> = {
   },
 };
 
-export const DEFAULT_PROMOS: PromoItem[] = [];
-
 export const DEFAULT_SETTINGS: ShopSettings = {
   shopName: 'GOLD RESERVE',
   outletName: 'Amanjaya Mall',
@@ -297,23 +295,17 @@ export async function pushOutletPrices(
 
 type PromoRow = {
   id?: string;
-  title?: string | null;
-  subtitle?: string | null;
-  badge?: string | null;
   image_url?: string | null;
-  valid_until?: string | null;
-  terms?: string | null;
   is_active?: boolean | null;
 };
 
-/** Baca semua poster bagi satu outlet dari server. */
-export async function fetchOutletPromos(outletName: string): Promise<PromoItem[]> {
+/** Baca semua poster promosi global dari server (sama untuk semua outlet). */
+export async function fetchPromos(): Promise<PromoItem[]> {
   if (!isSupabaseConfigured || !supabase) return [];
 
   const { data, error } = await supabase
     .from('kiosk_promos')
-    .select('id, title, subtitle, badge, image_url, valid_until, terms, is_active')
-    .eq('outlet_name', outletName)
+    .select('id, image_url, is_active')
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
 
@@ -325,32 +317,18 @@ export async function fetchOutletPromos(outletName: string): Promise<PromoItem[]
 
   return (data as PromoRow[]).map((row, index) => ({
     id: String(row.id ?? `promo-${index}`),
-    title: row.title ?? '',
-    subtitle: row.subtitle ?? '',
-    badge: row.badge ?? '',
     imageUrl: row.image_url ?? '',
-    validUntil: row.valid_until ?? '',
-    terms: row.terms ?? '',
     isActive: row.is_active !== false,
   }));
 }
 
-/** Ganti senarai poster sesuatu outlet di server (admin sahaja). */
-export async function pushOutletPromos(
-  outletName: string,
-  promos: PromoItem[],
-): Promise<void> {
+/** Ganti senarai poster global di server (admin sahaja). */
+export async function pushPromos(promos: PromoItem[]): Promise<void> {
   const db = requireClient();
 
   const rows = promos.map((promo, index) => ({
     id: promo.id,
-    outlet_name: outletName,
-    title: promo.title,
-    subtitle: promo.subtitle,
-    badge: promo.badge,
     image_url: promo.imageUrl,
-    valid_until: promo.validUntil,
-    terms: promo.terms,
     is_active: promo.isActive,
     sort_order: index,
   }));
@@ -358,7 +336,7 @@ export async function pushOutletPromos(
   if (rows.length > 0) {
     const { error } = await db
       .from('kiosk_promos')
-      .upsert(rows, { onConflict: 'outlet_name,id' });
+      .upsert(rows, { onConflict: 'id' });
     if (error) {
       throw new Error(`Gagal menyimpan poster ke server: ${error.message}`);
     }
@@ -367,8 +345,7 @@ export async function pushOutletPromos(
   // Buang poster yang telah dipadam dari senarai.
   const { data: existing, error: existingError } = await db
     .from('kiosk_promos')
-    .select('id')
-    .eq('outlet_name', outletName);
+    .select('id');
 
   if (existingError) {
     throw new Error(`Gagal menyemak poster sedia ada: ${existingError.message}`);
@@ -380,11 +357,7 @@ export async function pushOutletPromos(
     .filter((id): id is string => typeof id === 'string' && !keep.has(id));
 
   if (removeIds.length > 0) {
-    const { error } = await db
-      .from('kiosk_promos')
-      .delete()
-      .eq('outlet_name', outletName)
-      .in('id', removeIds);
+    const { error } = await db.from('kiosk_promos').delete().in('id', removeIds);
     if (error) {
       throw new Error(`Gagal memadam poster lama: ${error.message}`);
     }
@@ -395,18 +368,12 @@ export async function pushOutletPromos(
  * Muat naik gambar poster ke Supabase Storage dan pulangkan URL awam.
  * Bucket `promo-posters` hanya boleh ditulis oleh admin.
  */
-export async function uploadPromoImage(blob: Blob, outletName: string): Promise<string> {
+export async function uploadPromoImage(blob: Blob): Promise<string> {
   const db = requireClient();
-
-  const outletSlug =
-    outletName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'outlet';
 
   const extension =
     blob.type === 'image/webp' ? 'webp' : blob.type === 'image/png' ? 'png' : 'jpg';
-  const path = `${outletSlug}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+  const path = `posters/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
 
   const { error } = await db.storage.from('promo-posters').upload(path, blob, {
     contentType: blob.type || 'image/jpeg',
@@ -582,8 +549,9 @@ export function subscribeToOutletChanges(
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'kiosk_promos' },
-      (payload) => {
-        if (matchesOutlet(payload)) onChange();
+      () => {
+        // Poster adalah global — sebarang perubahan relevan untuk semua outlet.
+        onChange();
       },
     )
     .on(

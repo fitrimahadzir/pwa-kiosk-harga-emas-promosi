@@ -11,7 +11,6 @@ import {
   Check,
   Upload,
   RotateCcw,
-  Calendar,
   Sparkles,
   LogOut,
   Menu,
@@ -362,12 +361,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const persistPromo = async (id: string, imageUrl: string) => {
     const created: PromoItem = {
       id,
-      title: `Poster Promosi ${draftPromos.length + 1}`,
-      subtitle: '',
-      badge: '',
       imageUrl,
-      validUntil: '',
-      terms: '',
       isActive: true,
     };
 
@@ -379,7 +373,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setNewPromo({ imageUrl: '', isActive: true });
     setPromoUploadError('');
     setPromoError('');
-    setPromoSuccess('Poster berjaya disimpan ke server dan akan muncul di outlet.');
+    setPromoSuccess('Poster global berjaya disimpan dan akan muncul di semua outlet.');
     setTimeout(() => setPromoSuccess(''), 5000);
   };
 
@@ -415,7 +409,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
     try {
       const blob = await preparePromoImage(file);
-      const imageUrl = await uploadPromoImage(blob, currentOutletName);
+      const imageUrl = await uploadPromoImage(blob);
       const id = newPromo.id ?? `promo-${Date.now()}`;
 
       // Simpan terus ke Supabase — bukan sekadar pratonton setempat.
@@ -796,7 +790,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
                 <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-gold-deep/25 bg-gold/10 px-2.5 py-1 text-[11px] font-semibold text-maroon">
                   <MapPin className="size-3 text-gold-deep" />
-                  Poster untuk outlet: {currentOutletName || '(tiada outlet dipilih)'}
+                  Poster global — sama untuk semua outlet
                 </p>
               </div>
 
@@ -833,7 +827,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                     <p className="rounded-lg bg-white/60 px-3 py-2 text-[11px] leading-relaxed text-maroon-deep/60">
                       Pilih gambar sahaja — ia akan terus dimuat naik dan disimpan ke server,
-                      kemudian muncul pada semua paparan outlet bagi outlet yang dipilih.
+                      kemudian dipaparkan pada semua outlet.
                     </p>
 
                     <div>
@@ -942,7 +936,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 )}
 
                 <div className="space-y-2.5">
-                  {draftPromos.map((promo) => (
+                  {draftPromos.map((promo, index) => (
                     <div
                       key={promo.id}
                       className={`flex items-center justify-between gap-3 rounded-xl border border-line/15 bg-[#fbf6ef] p-3 ${
@@ -956,23 +950,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           className="aspect-[3/4] w-12 shrink-0 rounded-lg border border-line/15 object-cover"
                         />
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="truncate font-heading text-lg leading-none text-maroon-deep">{promo.title}</p>
-                            {promo.badge && (
-                              <span className="rounded-full border border-gold-deep/25 bg-gold/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
-                                {promo.badge}
-                              </span>
-                            )}
-                          </div>
-                          {promo.subtitle && (
-                            <p className="mt-1 truncate text-xs text-maroon-deep/55">{promo.subtitle}</p>
-                          )}
-                          {promo.validUntil && (
-                            <p className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-maroon-deep/40">
-                              <Calendar className="size-3 text-gold-deep" />
-                              Sah {promo.validUntil}
-                            </p>
-                          )}
+                          <p className="truncate font-heading text-lg leading-none text-maroon-deep">
+                            Poster {index + 1}
+                          </p>
+                          <p className="mt-1 text-[11px] text-maroon-deep/50">
+                            Dikongsi oleh semua outlet
+                          </p>
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -993,7 +976,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           onClick={() => handleDeletePromo(promo.id)}
                           disabled={promoSaving}
                           className="grid size-8 place-items-center rounded-lg text-[#a34a26] hover:bg-[#fbeee9] disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label={`Padam ${promo.title}`}
+                          aria-label={`Padam poster ${index + 1}`}
                         >
                           <Trash2 className="size-4" />
                         </button>

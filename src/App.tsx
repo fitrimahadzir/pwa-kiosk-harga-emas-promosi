@@ -18,8 +18,8 @@ import {
   fetchAllOutletPrices,
   fetchOutletPrices,
   pushOutletPrices,
-  fetchOutletPromos,
-  pushOutletPromos,
+  fetchPromos,
+  pushPromos,
   fetchOutletSettings,
   pushOutletSettings,
   fetchOutletHistory,
@@ -216,7 +216,7 @@ export default function App() {
     if (!outletName) return;
 
     const [remotePromos, remoteSettings] = await Promise.all([
-      fetchOutletPromos(outletName),
+      fetchPromos(),
       fetchOutletSettings(outletName),
     ]);
 
@@ -442,16 +442,14 @@ export default function App() {
     await Promise.all([refreshPrices(), refreshHistory(), refreshAllPrices()]);
   };
 
-  // Poster promosi disimpan di Supabase (termasuk fail gambar di Storage).
+  // Poster promosi global disimpan di Supabase (sama untuk semua outlet).
   const handleUpdatePromos = async (newPromos: PromoItem[]): Promise<void> => {
-    const outletName = currentOutletName;
-    if (!outletName) throw new Error('Tiada outlet dipilih.');
     if (!adminSession) {
       throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
     }
 
-    await pushOutletPromos(outletName, newPromos);
-    setPromos(await fetchOutletPromos(outletName));
+    await pushPromos(newPromos);
+    setPromos(await fetchPromos());
   };
 
   // Tetapan kedai disimpan di Supabase.
