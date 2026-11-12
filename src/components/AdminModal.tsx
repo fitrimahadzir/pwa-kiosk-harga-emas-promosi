@@ -365,7 +365,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       isActive: true,
     };
 
-    const updated = [created, ...draftPromos.filter((promo) => promo.id !== id)];
+    const existingIndex = draftPromos.findIndex((promo) => promo.id === id);
+    // Poster pertama kekal di posisi pertama; poster baharu ditambah di hujung.
+    const updated =
+      existingIndex === -1
+        ? [...draftPromos, created]
+        : draftPromos.map((promo) => (promo.id === id ? created : promo));
 
     await onUpdatePromos(updated);
     setDraftPromos(updated);
