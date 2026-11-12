@@ -1,38 +1,28 @@
 import { useEffect, useRef } from 'react';
-import {
-  GoldPriceItem,
-  GoldPurity,
-  PromoItem,
-} from '../types/gold';
-import {
-  savePrices,
-  savePromos,
-  subscribeToSupabasePrices,
-  type RealtimePriceListener,
-} from '../utils/storage';
+import { subscribeToOutletPrices } from '../utils/storage';
 
+/**
+ * Langgan perubahan harga Supabase untuk satu outlet.
+ *
+ * Mesej realtime hanya dijadikan ISYARAT. Pemanggil (`App`) mesti fetch
+ * semula harga daripada jadual — payload tidak dipercayai dan tidak pernah
+ * ditulis terus ke localStorage.
+ */
 export function useSupabaseRealtime(
-  prices: Record<GoldPurity, GoldPriceItem>
+  outletName: string | null,
+  onRemoteChange: () => void
 ): void {
-  const savedCallbackRef = useRef<RealtimePriceListener | null>(null);
+  const callbackRef = useRef(onRemoteChange);
 
   useEffect(() => {
-    const listener = subscribeToSupabasePrices(
-      (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => {
-        // Save into the outlet the broadcast was for (not just the active one),
-        // without re-broadcasting so updates do not ping-pong between kiosks.
-        savePrices(prices, outletName, { broadcast: false });
-      }
-    );
+    callbackRef.current = onRemoteChange;
+  }, [onRemoteChange]);
 
-    if (listener) {
-      savedCallbackRef.current = listener;
-    }
-
-    return () => {
-      savedCallbackRef.current?.unsubscribe();
-      savedCallbackRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => {
+    if (!outletName) return;
+    const unsubscribe = subscribeToOutletPrices(outletName, () => {
+      callbackRef.current();
+    });
+    return unsubscribe;
+  }, [outletName]);
 }

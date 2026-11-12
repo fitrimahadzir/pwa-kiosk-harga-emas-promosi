@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, LogOut, Calculator } from 'lucide-react';
+import { Clock, LogOut, Calculator, ShieldCheck } from 'lucide-react';
 import { ShopSettings } from '../types/gold';
 import { BrandLogo } from './BrandLogo';
 
 interface HeaderProps {
   settings: ShopSettings;
   onLogout: () => void;
+  onOpenAdmin?: () => void;
   lastSyncTime?: string;
   showCalculator?: boolean;
   onToggleCalculator?: () => void;
@@ -14,6 +15,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   settings,
   onLogout,
+  onOpenAdmin,
   showCalculator = false,
   onToggleCalculator,
 }) => {
@@ -80,11 +82,22 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Logout Button - icon only */}
+            {/* Admin login (Supabase Auth) */}
+            {onOpenAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold"
+                title="Log masuk pentadbir"
+              >
+                <ShieldCheck size={15} className="text-gold" />
+              </button>
+            )}
+
+            {/* Keluar dari outlet semasa */}
             <button
               onClick={onLogout}
               className="inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold"
-              title="Keluar dari outlet semasa"
+              title="Tukar outlet"
             >
               <LogOut size={15} className="text-gold" />
             </button>

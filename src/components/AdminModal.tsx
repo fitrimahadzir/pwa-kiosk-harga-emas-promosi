@@ -34,19 +34,19 @@ interface AdminModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentOutletName: string;
-  /** Outlet name tied to the login session (from `kiosk_outlets`) — the admin identity. */
-  sessionOutletName: string;
+  /** Identiti admin yang disahkan (e-mel Supabase Auth). */
+  adminLabel: string;
   onSelectOutlet: (outletName: string) => void;
   availableOutlets: string[];
   outletPrices: Record<string, Record<GoldPurity, GoldPriceItem>>;
   prices: Record<GoldPurity, GoldPriceItem>;
-  onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => void;
+  onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => Promise<void>;
   promos: PromoItem[];
   onUpdatePromos: (newPromos: PromoItem[]) => void;
   settings: ShopSettings;
   onUpdateSettings: (newSettings: ShopSettings) => void;
   history: PriceHistoryEntry[];
-  onResetDefaults: () => void;
+  onResetDefaults: () => Promise<void>;
 }
 
 type AdminTab = 'prices' | 'promos' | 'history' | 'settings';
@@ -134,7 +134,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
   currentOutletName,
-  sessionOutletName,
+  adminLabel,
   onSelectOutlet,
   availableOutlets,
   outletPrices,
@@ -153,6 +153,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [draftPrices, setDraftPrices] = useState<Record<GoldPurity, GoldPriceItem>>(prices);
   const [priceNote, setPriceNote] = useState<string>('Pelarasan harga semasa');
   const [priceSuccessMsg, setPriceSuccessMsg] = useState<string>('');
+  const [priceError, setPriceError] = useState<string>('');
+  const [priceSaving, setPriceSaving] = useState<boolean>(false);
 
   const [draftPromos, setDraftPromos] = useState<PromoItem[]>(promos);
   const [showAddPromo, setShowAddPromo] = useState<boolean>(false);
@@ -223,12 +225,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     onSelectOutlet(name);
   };
 
-  const handleSavePrices = () => {
-    onUpdatePrices(draftPrices, priceNote);
-    setPriceSuccessMsg(
-      `Harga ${currentOutletName || 'outlet ini'} berjaya dikemaskini dan disegerakkan.`,
-    );
-    setTimeout(() => setPriceSuccessMsg(''), 3000);
+  const handleSavePrices = async () => {
+    if (priceSaving) return;
+    setPriceSaving(true);
+    setPriceSuccessMsg('');
+    setPriceError('');
+    try {
+      await onUpdatePrices(draftPrices, priceNote);
+      setPriceSuccessMsg(
+        `Harga ${currentOutletName || 'outlet ini'} berjaya disimpan ke server.`,
+      );
+      setTimeout(() => setPriceSuccessMsg(''), 3000);
+    } catch (error) {
+      setPriceError(
+        error instanceof Error ? error.message : 'Gagal menyimpan harga ke server.',
+      );
+    } finally {
+      setPriceSaving(false);
+    }
   };
 
   const handleTogglePromo = (id: string) => {
@@ -311,7 +325,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* Outlet name tied to the login (from kiosk_outlets) — stays fixed
                 even when another outlet is selected for price editing. */}
             <p className="truncate text-[8.5px] font-semibold uppercase tracking-[0.26em] text-cream/40 mt-1.5">
-              {sessionOutletName || 'Admin'}
+              {adminLabel || 'Admin'}
             </p>
           </div>
         </div>
@@ -345,10 +359,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         <div className="gr-hairline mb-4" />
         <div className="flex items-center gap-3 rounded-lg border border-line/60 bg-maroon/30 p-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/60 text-[11px] font-semibold text-gold-soft">
-            {initials(sessionOutletName || 'Admin')}
+            {initials(adminLabel || 'Admin')}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-cream">{sessionOutletName || 'Admin'}</p>
+            <p className="truncate text-sm font-medium text-cream">{adminLabel || 'Admin'}</p>
             <p className="truncate text-[11px] text-cream/40">Pentadbir</p>
           </div>
         </div>
@@ -386,7 +400,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <img src="/SVG/company-name.svg" alt="Gold Reserve" className="h-4 w-auto" />
             </div>
             <div className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/30 bg-maroon-soft/50 text-[11px] font-semibold text-gold-soft">
-              {initials(sessionOutletName || 'Admin')}
+              {initials(adminLabel || 'Admin')}
             </div>
           </div>
         </header>
@@ -404,10 +418,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <button
                 type="button"
                 onClick={handleSavePrices}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft"
+                disabled={priceSaving}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save className="size-4" />
-                Simpan harga
+                {priceSaving ? 'Menyimpan...' : 'Simpan harga'}
               </button>
             )}
             {activeTab === 'promos' && (
@@ -489,6 +504,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/30 bg-[#eef8f1] px-3 py-1.5 text-xs font-semibold text-[#3f835b]">
                       <Check className="size-3.5" />
                       {priceSuccessMsg}
+                    </span>
+                  )}
+                  {priceError && (
+                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-rose-700/30 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700">
+                      <X className="size-3.5 shrink-0" />
+                      <span className="truncate">{priceError}</span>
                     </span>
                   )}
                 </div>
@@ -925,14 +946,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       if (
-                        window.confirm(
+                        !window.confirm(
                           'Adakah anda pasti ingin memulihkan semua data harga dan promosi ke tetapan asal?',
                         )
                       ) {
-                        onResetDefaults();
+                        return;
+                      }
+                      try {
+                        await onResetDefaults();
                         onClose();
+                      } catch (error) {
+                        window.alert(
+                          error instanceof Error
+                            ? error.message
+                            : 'Gagal memulihkan data asal.',
+                        );
                       }
                     }}
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#a34a26] hover:text-[#7c2727]"
@@ -1053,32 +1083,40 @@ function OutletSelect({
             role="listbox"
             className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-line bg-[#fbf6ef] p-1 shadow-[0_18px_40px_-18px_rgba(59,7,7,0.55)]"
           >
-            {outlets.map((name) => {
-              const isActive = name === selected;
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  role="option"
-                  aria-selected={isActive}
-                  onClick={() => {
-                    onSelect(name);
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
-                    isActive ? 'bg-gold/15 text-maroon' : 'text-maroon-deep hover:bg-gold/10'
-                  }`}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <MapPin
-                      className={`size-3.5 shrink-0 ${isActive ? 'text-gold-deep' : 'text-maroon-deep/40'}`}
-                    />
-                    <span className="truncate">{name}</span>
-                  </span>
-                  {isActive && <Check className="size-3.5 shrink-0 text-gold-deep" />}
-                </button>
-              );
-            })}
+            {outlets.length === 0 ? (
+              <p className="px-3 py-3 text-center text-xs leading-relaxed text-maroon-deep/55">
+                Tiada outlet awam ditemui. Pastikan outlet berdaftar dengan
+                <span className="font-semibold"> role = &apos;outlet&apos; </span>
+                di Supabase.
+              </p>
+            ) : (
+              outlets.map((name) => {
+                const isActive = name === selected;
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    onClick={() => {
+                      onSelect(name);
+                      setOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
+                      isActive ? 'bg-gold/15 text-maroon' : 'text-maroon-deep hover:bg-gold/10'
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <MapPin
+                        className={`size-3.5 shrink-0 ${isActive ? 'text-gold-deep' : 'text-maroon-deep/40'}`}
+                      />
+                      <span className="truncate">{name}</span>
+                    </span>
+                    {isActive && <Check className="size-3.5 shrink-0 text-gold-deep" />}
+                  </button>
+                );
+              })
+            )}
           </div>
         </>
       )}

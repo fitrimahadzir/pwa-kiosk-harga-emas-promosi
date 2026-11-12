@@ -40,7 +40,6 @@ export interface ShopSettings {
   phone: string;
   address: string;
   tagline: string;
-  adminPin: string;
   currency: string;
 }
 

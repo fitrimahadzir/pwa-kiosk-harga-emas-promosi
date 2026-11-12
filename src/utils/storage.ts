@@ -1,7 +1,10 @@
 import { GoldPriceItem, GoldPurity, PromoItem, PriceHistoryEntry, ShopSettings, OutletConfig } from '../types/gold';
-import { SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { LOCAL_DEMO_OUTLET_NAMES, OUTLET_RENAMES } from '../lib/auth';
+
+/** Outlet yang pernah dinamakan semula: nama lama -> nama semasa. */
+export const OUTLET_RENAMES: Record<string, string> = {
+  HeadQuarters: 'HQ Warehouse',
+};
 
 const PRICES_KEY = 'emaspos_gold_prices_v1';
 const PROMOS_KEY = 'emaspos_promos_v1';
@@ -10,6 +13,8 @@ const HISTORY_KEY = 'emaspos_price_history_v1';
 
 const OUTLETS_KEY = 'emaspos_outlets_v1';
 const CURRENT_OUTLET_KEY = 'emaspos_current_outlet_v1';
+/** Senarai nama outlet awam terakhir yang disahkan server (role = 'outlet'). */
+const PUBLIC_OUTLETS_KEY = 'emaspos_kiosk_outlet_names_v1';
 
 export const DEFAULT_PRICES: Record<GoldPurity, GoldPriceItem> = {
   '999': {
@@ -94,7 +99,6 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   phone: '012-8899 375',
   address: 'No. 18-G, Jalan Sultan Ismail, 50250 Kuala Lumpur',
   tagline: 'Ketulenan Terjamin • Nilai Warisan Sepanjang Zaman',
-  adminPin: '1234',
   currency: 'MYR',
 };
 
@@ -169,108 +173,112 @@ export function subscribeToSync(callback: (type: string) => void) {
   };
 }
 
-// Supabase Realtime helpers for gold prices and promos
-let priceChannel: RealtimeChannel | null = null;
-let priceUnsubscribe: (() => void) | null = null;
-
-export interface RealtimePriceListener {
-  unsubscribe: () => void;
-}
-
-type BroadcastPricesPayload = {
-  outletName?: string;
-  prices?: Record<GoldPurity, GoldPriceItem>;
-};
-
-type BroadcastPromosPayload = {
-  outletName?: string;
-  promos?: PromoItem[];
-};
-
-export function subscribeToSupabasePrices(
-  onPrices: (prices: Record<GoldPurity, GoldPriceItem>, outletName: string) => void
-): RealtimePriceListener | null {
+/**
+ * Langgan perubahan harga (postgres_changes) untuk satu outlet.
+ * Payload TIDAK dipercayai: pemanggil mesti fetch semula dari jadual.
+ */
+export function subscribeToOutletPrices(
+  outletName: string,
+  onChange: () => void
+): () => void {
   if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
-    return null;
+    return () => {};
   }
 
-  priceChannel = supabase.channel('gold_prices');
-
-  priceChannel.on(
-    'broadcast',
-    { event: 'prices-changed' },
-    (payload) => {
-      const raw = payload.payload as { outletName?: string; prices?: Record<GoldPurity, GoldPriceItem> } | null;
-      if (raw?.prices && !Array.isArray(raw.prices)) {
-        onPrices(raw.prices as Record<GoldPurity, GoldPriceItem>, raw.outletName ?? 'default');
+  const channel = supabase
+    .channel(`kiosk_prices:${outletName}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_prices' },
+      (payload) => {
+        const row = (payload.new ?? payload.old) as { outlet_name?: string } | null;
+        if (!row || row.outlet_name === outletName) onChange();
       }
-    }
-  );
+    )
+    .subscribe();
 
-  void priceChannel.subscribe((status, error) => {
-    if (error) {
-      console.warn('[emaspos] Supabase prices channel error:', error);
-    } else if (typeof status === 'string' && status.startsWith('ok')) {
-      console.log('[emaspos] Joined gold_prices realtime channel');
-    }
-  });
-
-  priceUnsubscribe = () => {
+  return () => {
     try {
-      priceChannel?.unsubscribe();
+      void supabase?.removeChannel(channel);
     } catch {
       // ignore
     }
-    priceChannel = null;
-    priceUnsubscribe = null;
-  };
-
-  return {
-    unsubscribe: priceUnsubscribe,
   };
 }
 
-/**
- * Broadcast current prices and optionally promos to the same Supabase project,
- * so other kiosks subscribe to `gold_prices` receive them without any database table.
- */
-export function broadcastPrices(
-  prices: Record<GoldPurity, GoldPriceItem>,
-  promos?: PromoItem[],
-  outletName?: string
-): void {
-  if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
-    return;
+/** Baca harga terkini sesuatu outlet. Pulangkan null jika tiada/ralat. */
+export async function fetchOutletPrices(
+  outletName: string
+): Promise<Record<GoldPurity, GoldPriceItem> | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  const { data, error } = await supabase
+    .from('kiosk_prices')
+    .select('outlet_name, purity, sell_price, buy_price, updated_at')
+    .eq('outlet_name', outletName);
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca harga:', error.message);
+    return null;
+  }
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  const next = cloneDefaultPrices();
+  let found = false;
+
+  for (const row of data as Array<{
+    purity?: string;
+    sell_price?: number | string;
+    buy_price?: number | string;
+    updated_at?: string;
+  }>) {
+    const purity = row.purity;
+    if (typeof purity !== 'string' || !isGoldPurity(purity)) continue;
+
+    const sell = Number(row.sell_price);
+    const buy = Number(row.buy_price);
+    if (!Number.isFinite(sell) || !Number.isFinite(buy) || sell <= 0 || buy < 0 || buy > sell) {
+      continue;
+    }
+
+    next[purity] = {
+      ...next[purity],
+      sellPrice: sell,
+      buyPrice: buy,
+      updatedAt: row.updated_at ?? new Date().toISOString(),
+    };
+    found = true;
   }
 
-  // Upsert prices to the kiosk_prices table per outlet
-  const priceData = Object.entries(prices).map(([purity, price]) => ({
-    outlet_name: outletName ?? 'default',
+  return found ? next : null;
+}
+
+/**
+ * Tulis harga ke server. Hanya berjaya untuk admin yang disahkan oleh RLS
+ * (`public.is_kiosk_admin()`). Outlet / anon akan ditolak oleh pangkalan data.
+ */
+export async function pushOutletPrices(
+  outletName: string,
+  prices: Record<GoldPurity, GoldPriceItem>
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Supabase belum dikonfigurasi.');
+  }
+
+  const priceData = (['999', '916', '375'] as GoldPurity[]).map((purity) => ({
+    outlet_name: outletName,
     purity,
-    sell_price: price.sellPrice,
-    buy_price: price.buyPrice
+    sell_price: prices[purity].sellPrice,
+    buy_price: prices[purity].buyPrice,
   }));
 
-  void supabase.from('kiosk_prices').upsert(priceData, { onConflict: 'outlet_name, purity' });
+  const { error } = await supabase
+    .from('kiosk_prices')
+    .upsert(priceData, { onConflict: 'outlet_name,purity' });
 
-  // Broadcast to all tabs so they reload from DB immediately
-  const channel = supabase.channel('gold_prices');
-
-  void channel.send({
-    type: 'broadcast',
-    event: 'prices-changed',
-    payload: { outletName, prices },
-  });
-
-  if (Array.isArray(promos)) {
-    void channel.send({
-      type: 'broadcast',
-      event: 'promos-changed',
-      payload: { outletName, promos },
-    });
+  if (error) {
+    throw new Error(`Gagal menyimpan harga ke server: ${error.message}`);
   }
-
-  void channel.unsubscribe();
 }
 
 // Outlet-scoped storage
@@ -322,6 +330,13 @@ export function saveCurrentOutletName(outletName: string) {
   notifySync('settings');
 }
 
+/** Keluar dari paparan kiosk: buang pilihan outlet pada peranti ini. */
+export function clearCurrentOutletName() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(CURRENT_OUTLET_KEY);
+  notifySync('settings');
+}
+
 export function getOutlet(outletName: string): OutletConfig | null {
   const outlets = loadOutlets();
   return outlets[outletName] ?? null;
@@ -338,6 +353,45 @@ export function listOutletNames(): string[] {
   return Object.keys(outlets).sort();
 }
 
+/**
+ * Nama outlet yang selamat dipaparkan di kiosk.
+ * `Admin` disekat sebagai pertahanan tambahan walaupun server sudah menapis
+ * `role = 'outlet'` — outlet role admin tidak sepatutnya muncul di kiosk.
+ */
+function sanitizePublicOutletNames(names: unknown[]): string[] {
+  const unique = new Set<string>();
+  for (const value of names) {
+    if (typeof value !== 'string') continue;
+    const name = value.trim();
+    if (!name) continue;
+    if (name.toLowerCase() === 'admin') continue;
+    unique.add(name);
+  }
+  return Array.from(unique).sort();
+}
+
+/** Senarai outlet awam terakhir daripada server (cache selamat luar talian). */
+export function loadPublicOutletNames(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PUBLIC_OUTLETS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? sanitizePublicOutletNames(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePublicOutletNames(names: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(PUBLIC_OUTLETS_KEY, JSON.stringify(sanitizePublicOutletNames(names)));
+  } catch {
+    // Storage penuh / disekat — cache pilihan outlet tidak kritikal.
+  }
+}
+
 // Legacy compatibility helpers for non-outlet aware flows
 export function loadPrices(): Record<GoldPurity, GoldPriceItem> {
   const currentOutlet = loadCurrentOutletName();
@@ -351,14 +405,12 @@ export function loadPrices(): Record<GoldPurity, GoldPriceItem> {
 /**
  * Save prices for a specific outlet (defaults to the current one).
  *
- * `options.broadcast = false` is used when prices arrive from a Supabase
- * realtime broadcast, so kiosks do not re-broadcast the same update back and
- * ping-pong messages between devices forever.
+ * Ini HANYA menulis cache localStorage. Penulisan ke Supabase dilakukan
+ * secara eksplisit oleh `pushOutletPrices()` selepas admin disahkan.
  */
 export function savePrices(
   prices: Record<GoldPurity, GoldPriceItem>,
-  outletName?: string,
-  options?: { broadcast?: boolean }
+  outletName?: string
 ) {
   if (typeof window === 'undefined') return;
   const currentOutlet = loadCurrentOutletName() ?? DEFAULT_OUTLET.outletName;
@@ -373,9 +425,6 @@ export function savePrices(
   upsertOutlet(updated);
   if (targetOutlet === currentOutlet) {
     notifySync('prices');
-  }
-  if (options?.broadcast !== false) {
-    broadcastPrices(prices, undefined, targetOutlet);
   }
 }
 
@@ -400,7 +449,6 @@ export function savePromos(promos: PromoItem[]) {
   };
   upsertOutlet(updated);
   notifySync('promos');
-  broadcastPrices(loadPrices(), promos, currentOutlet);
 }
 
 export function loadSettings(): ShopSettings {
@@ -494,42 +542,51 @@ function seedMissingOutlets(
  *
  * This lets the admin panel offer EVERY outlet when picking which outlet to
  * update prices for — even outlets that have never logged in on this device.
- * Returns the sorted outlet names known locally after seeding. When Supabase
- * is not configured (or unreachable) it simply falls back to the local list.
+ * Returns the sorted outlet names confirmed by the server (role = 'outlet').
+ * When Supabase is not configured (or unreachable) it falls back to the last
+ * confirmed list, then to the local cache — never to admin-role rows.
  */
 export async function syncRemoteOutlets(): Promise<string[]> {
+  const fallback = (): string[] => {
+    const cached = loadPublicOutletNames();
+    return cached.length > 0 ? cached : sanitizePublicOutletNames(listOutletNames());
+  };
+
   if (!isSupabaseConfigured || typeof window === 'undefined' || !supabase) {
-    // Local demo mode: still make every demo outlet selectable in the admin
-    // panel so per-outlet pricing can be tried without a database.
-    seedMissingOutlets(LOCAL_DEMO_OUTLET_NAMES);
-    return listOutletNames();
+    return fallback();
   }
 
-  const { data: outletRows, error: outletError } = await supabase
-    .from('kiosk_outlets')
-    .select('name')
-    .eq('is_active', true);
+  // Public outlet names are exposed through a SECURITY DEFINER function so the
+  // kiosk never needs SELECT access to `kiosk_outlets` (which holds `code`).
+  // The function only returns rows with role = 'outlet'.
+  let names: string[] = [];
+
+  const { data: outletRows, error: outletError } = await supabase.rpc('kiosk_outlet_names');
 
   if (outletError || !Array.isArray(outletRows)) {
     console.warn('[emaspos] Failed to load outlets from Supabase:', outletError?.message);
-    return listOutletNames();
+  } else {
+    names = sanitizePublicOutletNames(
+      outletRows.map((row) => (row as { name?: string }).name),
+    );
   }
-
-  const names = Array.from(
-    new Set(
-      outletRows
-        .map((row) => (row as { name?: string }).name)
-        .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
-        .map((name) => name.trim()),
-    ),
-  );
-
-  if (names.length === 0) return listOutletNames();
 
   // Latest prices per outlet — the kiosk_prices table is the source of truth.
   const { data: priceRows } = await supabase
     .from('kiosk_prices')
     .select('outlet_name, purity, sell_price, buy_price');
+
+  // Fallback: if the RPC is unavailable or empty, derive public outlet names
+  // from the price rows (anon has read-only access to kiosk_prices).
+  if (names.length === 0 && Array.isArray(priceRows)) {
+    names = sanitizePublicOutletNames(
+      priceRows.map((row) => (row as { outlet_name?: string }).outlet_name),
+    );
+  }
+
+  if (names.length === 0) {
+    return fallback();
+  }
 
   const remotePrices = new Map<string, Record<GoldPurity, GoldPriceItem>>();
   if (Array.isArray(priceRows)) {
@@ -560,6 +617,7 @@ export async function syncRemoteOutlets(): Promise<string[]> {
     }
   }
 
+  savePublicOutletNames(names);
   seedMissingOutlets(names, remotePrices);
-  return Object.keys(loadOutlets()).sort();
+  return names;
 }
