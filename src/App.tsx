@@ -152,6 +152,17 @@ export default function App() {
     };
   }, []);
 
+  // Sesi admin yang disahkan sentiasa dihalakan ke panel admin, termasuk
+  // selepas refresh atau membuka semula PWA.
+  useEffect(() => {
+    if (!authChecked || !adminSession) return;
+    if (parseHash().admin) return;
+
+    window.location.hash = '/admin';
+    setRoute({ admin: true, page: 'home' });
+    setPage('home');
+  }, [authChecked, adminSession, route.admin]);
+
   // If Supabase ends the session (logout elsewhere, revoked token), drop admin.
   useEffect(() => {
     if (!supabase) return;
