@@ -382,6 +382,40 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setTimeout(() => setPromoSuccess(''), 5000);
   };
 
+  const handleDeleteAllPromos = async () => {
+    if (promoSaving || draftPromos.length === 0) return;
+    if (
+      !window.confirm(
+        `Adakah anda pasti ingin memadam SEMUA ${draftPromos.length} poster promosi? Tindakan ini tidak boleh dibatalkan.`,
+      )
+    ) {
+      return;
+    }
+
+    const imageUrls = draftPromos
+      .map((promo) => promo.imageUrl)
+      .filter((url): url is string => Boolean(url));
+
+    setPromoSaving(true);
+    setPromoError('');
+    setPromoSuccess('');
+    try {
+      await onUpdatePromos([]);
+      setDraftPromos([]);
+      setPromoSuccess('Semua poster promosi telah dipadam.');
+      setTimeout(() => setPromoSuccess(''), 5000);
+
+      // Padam fail gambar di Storage selepas rekod server berjaya dipadam.
+      await Promise.allSettled(imageUrls.map((url) => deletePromoImage(url)));
+    } catch (error) {
+      setPromoError(
+        error instanceof Error ? error.message : 'Gagal memadam semua poster.',
+      );
+    } finally {
+      setPromoSaving(false);
+    }
+  };
+
   const handleCreatePromo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPromo.imageUrl || promoSaving || promoUploading) return;
@@ -989,6 +1023,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
                   ))}
                 </div>
+
+                {draftPromos.length > 0 && (
+                  <div className="flex justify-end border-t border-line/15 pt-4">
+                    <button
+                      type="button"
+                      onClick={handleDeleteAllPromos}
+                      disabled={promoSaving}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#a34a26]/30 bg-[#fbeee9] px-3 text-xs font-semibold text-[#a34a26] transition-colors hover:bg-[#f7e2d8] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {promoSaving ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )}
+                      {promoSaving
+                        ? 'Memadam...'
+                        : `Padam semua poster (${draftPromos.length})`}
+                    </button>
+                  </div>
+                )}
               </div>
             </section>
           )}
