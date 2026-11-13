@@ -15,10 +15,14 @@ import {
   LogOut,
   Menu,
   LayoutDashboard,
-  ChevronDown,
   MapPin,
-  PencilLine,
   Loader2,
+  Database,
+  RefreshCw,
+  ShieldCheck,
+  ExternalLink,
+  CalendarClock,
+  Copy,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -26,10 +30,11 @@ import {
   GoldPurity,
   PromoItem,
   PriceHistoryEntry,
-  ShopSettings,
 } from '../types/gold';
 import { formatMYR } from '../utils/calculator';
-import { deletePromoImage, uploadPromoImage } from '../utils/storage';
+import { DEFAULT_PRICES, deletePromoImage, uploadPromoImage } from '../utils/storage';
+import { isSupabaseConfigured, supabase, supabaseConfig } from '../lib/supabase';
+import { isStandalonePwa } from '../utils/device';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -37,20 +42,49 @@ interface AdminModalProps {
   currentOutletName: string;
   /** Identiti admin yang disahkan (e-mel Supabase Auth). */
   adminLabel: string;
-  onSelectOutlet: (outletName: string) => void;
   availableOutlets: string[];
   outletPrices: Record<string, Record<GoldPurity, GoldPriceItem>>;
   prices: Record<GoldPurity, GoldPriceItem>;
-  onUpdatePrices: (newPrices: Record<GoldPurity, GoldPriceItem>, note: string) => Promise<void>;
+  onUpdateAllPrices: (
+    updates: { outletName: string; prices: Record<GoldPurity, GoldPriceItem> }[],
+    note: string,
+  ) => Promise<void>;
   promos: PromoItem[];
   onUpdatePromos: (newPromos: PromoItem[]) => Promise<void>;
-  settings: ShopSettings;
-  onUpdateSettings: (newSettings: ShopSettings) => Promise<void>;
   history: PriceHistoryEntry[];
   onResetDefaults: () => Promise<void>;
 }
 
 type AdminTab = 'prices' | 'promos' | 'history' | 'settings';
+
+const PURITIES: GoldPurity[] = ['999', '916', '375'];
+
+const PURITY_ROWS: { id: GoldPurity; label: string; karat: string }[] = [
+  { id: '999', label: 'Emas 999', karat: '24K' },
+  { id: '916', label: 'Emas 916', karat: '22K' },
+  { id: '375', label: 'Emas 375', karat: '9K' },
+];
+
+/** Indeks lajur tetap 5 outlet seperti dalam templat reka bentuk. */
+const OUTLET_SLOTS = [1, 2, 3, 4, 5] as const;
+
+type PriceMatrix = Record<string, Record<GoldPurity, GoldPriceItem>>;
+type HqBase = Record<GoldPurity, { sellPrice: number; buyPrice: number }>;
+
+const MONTHS_MS = ['Jan', 'Feb', 'Mac', 'Apr', 'Mei', 'Jun', 'Jul', 'Ogos', 'Sep', 'Okt', 'Nov', 'Dis'];
+
+function formatKemaskiniTerakhir(iso: string | null): string {
+  if (!iso) return 'Belum dikemaskini';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Belum dikemaskini';
+
+  const time = date
+    .toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit', hour12: true })
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+
+  return `${date.getDate()} ${MONTHS_MS[date.getMonth()]}, ${time}`;
+}
 
 const NAV_ITEMS: { id: AdminTab; label: string; icon: LucideIcon }[] = [
   { id: 'prices', label: 'Harga', icon: Coins },
@@ -61,10 +95,10 @@ const NAV_ITEMS: { id: AdminTab; label: string; icon: LucideIcon }[] = [
 
 const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: string }> = {
   prices: {
-    kicker: 'Pentadbir',
-    title: 'Harga Emas',
+    kicker: 'Harga Harian',
+    title: 'Tetapan Harga Emas Semasa',
     description:
-      'Pilih outlet, kemudian laraskan harga jual dan beli semula — disegerakkan ke tablet kaunter outlet tersebut.',
+      'Matriks harga jual & beli semula (RM / gram) untuk semua outlet — disegerakkan ke tablet kaunter.',
   },
   promos: {
     kicker: 'Kaunter',
@@ -78,9 +112,10 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
     description: 'Rekod perubahan harga jualan dan belian semula.',
   },
   settings: {
-    kicker: 'Cawangan',
-    title: 'Tetapan Kedai',
-    description: 'Maklumat ini dicetak pada resit sebut harga dan paparan atas kiosk.',
+    kicker: 'Sistem',
+    title: 'Tetapan',
+    description:
+      'Pantau sambungan Supabase, identiti pentadbir, dan penyelenggaraan data kiosk.',
   },
 };
 
@@ -195,26 +230,120 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onClose,
   currentOutletName,
   adminLabel,
-  onSelectOutlet,
   availableOutlets,
   outletPrices,
   prices,
-  onUpdatePrices,
+  onUpdateAllPrices,
   promos,
   onUpdatePromos,
-  settings,
-  onUpdateSettings,
   history,
   onResetDefaults,
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('prices');
   const [navOpen, setNavOpen] = useState(false);
 
-  const [draftPrices, setDraftPrices] = useState<Record<GoldPurity, GoldPriceItem>>(prices);
-  const [priceNote, setPriceNote] = useState<string>('Pelarasan harga semasa');
+  // ---- Matriks harga harian ------------------------------------------------
+  const [matrix, setMatrix] = useState<PriceMatrix>({});
+  const [hqBase, setHqBase] = useState<HqBase>({
+    '999': {
+      sellPrice: DEFAULT_PRICES['999'].sellPrice,
+      buyPrice: DEFAULT_PRICES['999'].buyPrice,
+    },
+    '916': {
+      sellPrice: DEFAULT_PRICES['916'].sellPrice,
+      buyPrice: DEFAULT_PRICES['916'].buyPrice,
+    },
+    '375': {
+      sellPrice: DEFAULT_PRICES['375'].sellPrice,
+      buyPrice: DEFAULT_PRICES['375'].buyPrice,
+    },
+  });
+  const [matrixDirty, setMatrixDirty] = useState<boolean>(false);
+  const [priceNote, setPriceNote] = useState<string>('Pelarasan harga harian');
   const [priceSuccessMsg, setPriceSuccessMsg] = useState<string>('');
   const [priceError, setPriceError] = useState<string>('');
   const [priceSaving, setPriceSaving] = useState<boolean>(false);
+  const [copyNotice, setCopyNotice] = useState<string>('');
+
+  // Sehingga 5 outlet sebenar dipetakan ke lajur 1-5. Lajur tanpa outlet
+  // berdaftar dipaparkan sebagai tempat letak kosong (tidak boleh disimpan).
+  const matrixOutlets = useMemo(() => {
+    const names = [...availableOutlets];
+    if (names.length === 0 && currentOutletName) names.push(currentOutletName);
+    return Array.from(new Set(names)).slice(0, OUTLET_SLOTS.length);
+  }, [availableOutlets, currentOutletName]);
+
+  const outletSlots = useMemo(
+    () =>
+      OUTLET_SLOTS.map((slotNumber, index) => ({
+        slotNumber,
+        outletName: matrixOutlets[index] ?? null,
+        isHq: index === 0,
+      })),
+    [matrixOutlets],
+  );
+
+  // Tandatangan data server: effect penyemai semula hanya berjalan apabila
+  // outlet atau cap masa harga berubah — bukan pada setiap ketukan kekunci.
+  const matrixSignature = useMemo(() => {
+    const parts: string[] = [matrixOutlets.join('|'), currentOutletName ?? ''];
+    for (const name of matrixOutlets) {
+      const map = outletPrices[name];
+      parts.push(
+        `${name}:${map?.['999']?.updatedAt ?? ''}:${map?.['916']?.updatedAt ?? ''}:${
+          map?.['375']?.updatedAt ?? ''
+        }`,
+      );
+    }
+    parts.push(
+      `${prices['999']?.updatedAt ?? ''}:${prices['916']?.updatedAt ?? ''}:${
+        prices['375']?.updatedAt ?? ''
+      }`,
+    );
+    return parts.join('|');
+  }, [matrixOutlets, currentOutletName, outletPrices, prices]);
+
+  /** Bina semula matriks + harga asas HQ daripada data server terkini. */
+  const applySeed = () => {
+    const seeded: PriceMatrix = {};
+
+    for (const name of matrixOutlets) {
+      const source =
+        outletPrices[name] ?? (name === currentOutletName ? prices : DEFAULT_PRICES);
+      const outlet = {} as Record<GoldPurity, GoldPriceItem>;
+      for (const purity of PURITIES) {
+        outlet[purity] = {
+          ...DEFAULT_PRICES[purity],
+          ...(source?.[purity] ?? {}),
+        };
+      }
+      seeded[name] = outlet;
+    }
+
+    const hqSource = matrixOutlets[0] ? seeded[matrixOutlets[0]] : DEFAULT_PRICES;
+    setMatrix(seeded);
+    setHqBase({
+      '999': {
+        sellPrice: hqSource['999'].sellPrice,
+        buyPrice: hqSource['999'].buyPrice,
+      },
+      '916': {
+        sellPrice: hqSource['916'].sellPrice,
+        buyPrice: hqSource['916'].buyPrice,
+      },
+      '375': {
+        sellPrice: hqSource['375'].sellPrice,
+        buyPrice: hqSource['375'].buyPrice,
+      },
+    });
+    setMatrixDirty(false);
+  };
+
+  useEffect(() => {
+    applySeed();
+    // Penyemai semula bergantung pada tandatangan data, bukan identiti objek.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matrixSignature]);
 
   const [draftPromos, setDraftPromos] = useState<PromoItem[]>(promos);
   const [showAddPromo, setShowAddPromo] = useState<boolean>(false);
@@ -228,22 +357,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [promoError, setPromoError] = useState<string>('');
   const [promoSuccess, setPromoSuccess] = useState<string>('');
 
-  const [draftSettings, setDraftSettings] = useState<ShopSettings>(settings);
-  const [settingsSuccess, setSettingsSuccess] = useState<string>('');
-  const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
-  const [settingsError, setSettingsError] = useState<string>('');
+  // Supabase connection test in the settings tab.
+  const [supabaseTestState, setSupabaseTestState] = useState<
+    'idle' | 'testing' | 'success' | 'error'
+  >('idle');
+  const [supabaseTestMessage, setSupabaseTestMessage] = useState<string>('');
 
-  // Keep drafts in sync with the selected outlet's stored data. Without this,
-  // switching outlets would keep editing the previous outlet's prices/promos.
-  useEffect(() => {
-    setDraftPrices(prices);
-  }, [prices]);
+  // Keep promo drafts in sync with the selected outlet's stored data.
   useEffect(() => {
     setDraftPromos(promos);
   }, [promos]);
-  useEffect(() => {
-    setDraftSettings(settings);
-  }, [settings]);
 
   const todayLabel = useMemo(
     () =>
@@ -259,45 +382,165 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const activePromoCount = draftPromos.filter((promo) => promo.isActive).length;
   const page = PAGE_COPY[activeTab];
 
+  const lastUpdatedLabel = useMemo(() => {
+    const stamps: string[] = [];
+    for (const name of matrixOutlets) {
+      const map = outletPrices[name];
+      for (const purity of PURITIES) {
+        const stamp = map?.[purity]?.updatedAt;
+        if (stamp) stamps.push(stamp);
+      }
+    }
+    if (currentOutletName) {
+      for (const purity of PURITIES) {
+        const stamp = prices[purity]?.updatedAt;
+        if (stamp) stamps.push(stamp);
+      }
+    }
+
+    const times = stamps
+      .map((stamp) => new Date(stamp).getTime())
+      .filter((time) => Number.isFinite(time));
+
+    return formatKemaskiniTerakhir(
+      times.length ? new Date(Math.max(...times)).toISOString() : null,
+    );
+  }, [matrixOutlets, outletPrices, currentOutletName, prices]);
+
   if (!isOpen) return null;
 
-  // Outlet list used by the picker (fallback to the current outlet only)
-  const outletOptions =
-    availableOutlets.length > 0 ? availableOutlets : [currentOutletName || 'HQ Warehouse'];
+  const updateCell = (
+    outletName: string,
+    purity: GoldPurity,
+    field: 'sellPrice' | 'buyPrice',
+    value: number,
+  ) => {
+    setMatrix((previous) => {
+      const outlet = previous[outletName];
+      if (!outlet) return previous;
+      return {
+        ...previous,
+        [outletName]: {
+          ...outlet,
+          [purity]: { ...outlet[purity], [field]: value },
+        },
+      };
+    });
+    setMatrixDirty(true);
+    setPriceError('');
+    setPriceSuccessMsg('');
+  };
 
-  // True while the admin has unsaved price edits for the current outlet
-  const hasUnsavedPriceEdits = (['999', '916', '375'] as GoldPurity[]).some(
-    (purity) =>
-      draftPrices[purity].sellPrice !== prices[purity].sellPrice ||
-      draftPrices[purity].buyPrice !== prices[purity].buyPrice,
-  );
+  const updateHqBase = (
+    purity: GoldPurity,
+    field: 'sellPrice' | 'buyPrice',
+    value: number,
+  ) => {
+    setHqBase((previous) => ({
+      ...previous,
+      [purity]: { ...previous[purity], [field]: value },
+    }));
+    setCopyNotice('');
+  };
 
-  // Switch the outlet being edited (with a guard for unsaved price edits)
-  const handleSelectOutlet = (name: string) => {
-    if (name === currentOutletName) return;
+  const handleCopyHqToAll = () => {
+    if (matrixOutlets.length === 0) {
+      setPriceError('Tiada outlet berdaftar untuk disalin.');
+      return;
+    }
+
+    setMatrix((previous) => {
+      const next: PriceMatrix = { ...previous };
+      for (const name of matrixOutlets) {
+        const outlet = previous[name];
+        if (!outlet) continue;
+        const updated = {} as Record<GoldPurity, GoldPriceItem>;
+        for (const purity of PURITIES) {
+          updated[purity] = {
+            ...outlet[purity],
+            sellPrice: hqBase[purity].sellPrice,
+            buyPrice: hqBase[purity].buyPrice,
+          };
+        }
+        next[name] = updated;
+      }
+      return next;
+    });
+
+    setMatrixDirty(true);
+    setPriceError('');
+    setPriceSuccessMsg('');
+    setCopyNotice(
+      `Harga asas HQ disalin ke ${matrixOutlets.length} outlet berdaftar. Tekan "Simpan & Siarkan" untuk menerbitkan.`,
+    );
+    window.setTimeout(() => setCopyNotice(''), 5000);
+  };
+
+  const handleResetMatrix = () => {
     if (
-      hasUnsavedPriceEdits &&
-      !window.confirm(
-        'Ada perubahan harga yang belum disimpan. Tukar outlet dan abaikan perubahan ini?',
-      )
+      matrixDirty &&
+      !window.confirm('Set semula semua perubahan harga yang belum disimpan?')
     ) {
       return;
     }
+    applySeed();
+    setPriceError('');
     setPriceSuccessMsg('');
-    onSelectOutlet(name);
+    setCopyNotice('');
   };
 
-  const handleSavePrices = async () => {
+  const handleSaveMatrix = async () => {
     if (priceSaving) return;
-    setPriceSaving(true);
-    setPriceSuccessMsg('');
-    setPriceError('');
-    try {
-      await onUpdatePrices(draftPrices, priceNote);
-      setPriceSuccessMsg(
-        `Harga ${currentOutletName || 'outlet ini'} berjaya disimpan ke server.`,
+
+    const updates = matrixOutlets
+      .map((outletName) => ({ outletName, prices: matrix[outletName] }))
+      .filter(
+        (
+          entry,
+        ): entry is {
+          outletName: string;
+          prices: Record<GoldPurity, GoldPriceItem>;
+        } => Boolean(entry.prices),
       );
-      setTimeout(() => setPriceSuccessMsg(''), 3000);
+
+    if (updates.length === 0) {
+      setPriceError('Tiada outlet berdaftar untuk disimpan.');
+      return;
+    }
+
+    for (const { outletName, prices: outletPrice } of updates) {
+      for (const purity of PURITIES) {
+        const item = outletPrice[purity];
+        if (!Number.isFinite(item.sellPrice) || item.sellPrice <= 0) {
+          setPriceError(
+            `Harga jual ${purity} di ${outletName} mesti lebih besar daripada 0.`,
+          );
+          return;
+        }
+        if (!Number.isFinite(item.buyPrice) || item.buyPrice < 0) {
+          setPriceError(`Harga beli ${purity} di ${outletName} tidak sah.`);
+          return;
+        }
+        if (item.buyPrice > item.sellPrice) {
+          setPriceError(
+            `Harga beli ${purity} di ${outletName} tidak boleh melebihi harga jual.`,
+          );
+          return;
+        }
+      }
+    }
+
+    setPriceSaving(true);
+    setPriceError('');
+    setPriceSuccessMsg('');
+
+    try {
+      await onUpdateAllPrices(updates, priceNote.trim() || 'Pelarasan harga harian');
+      setMatrixDirty(false);
+      setPriceSuccessMsg(
+        `Harga ${updates.length} outlet berjaya disimpan & disiarkan.`,
+      );
+      window.setTimeout(() => setPriceSuccessMsg(''), 4500);
     } catch (error) {
       setPriceError(
         error instanceof Error ? error.message : 'Gagal menyimpan harga ke server.',
@@ -465,23 +708,59 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (settingsSaving) return;
+  const handleTestSupabaseConnection = async () => {
+    if (supabaseTestState === 'testing') return;
 
-    setSettingsSaving(true);
-    setSettingsError('');
-    setSettingsSuccess('');
-    try {
-      await onUpdateSettings({ ...draftSettings });
-      setSettingsSuccess('Tetapan kedai berjaya disimpan ke server.');
-      setTimeout(() => setSettingsSuccess(''), 3000);
-    } catch (error) {
-      setSettingsError(
-        error instanceof Error ? error.message : 'Gagal menyimpan tetapan.',
+    const client = supabase;
+    if (!client) {
+      setSupabaseTestState('error');
+      setSupabaseTestMessage(
+        'Supabase belum dikonfigurasi. Tetapkan VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY semasa build.',
       );
-    } finally {
-      setSettingsSaving(false);
+      return;
+    }
+
+    setSupabaseTestState('testing');
+    setSupabaseTestMessage('');
+
+    const startedAt = performance.now();
+    try {
+      const { data, error } = await client.rpc('kiosk_outlet_names');
+      const elapsed = Math.round(performance.now() - startedAt);
+
+      if (error) throw new Error(error.message);
+
+      const outletCount = Array.isArray(data) ? data.length : 0;
+      setSupabaseTestState('success');
+      setSupabaseTestMessage(
+        `Sambungan berjaya dalam ${elapsed} ms • ${outletCount} outlet dapat dibaca.`,
+      );
+    } catch (error) {
+      setSupabaseTestState('error');
+      setSupabaseTestMessage(
+        error instanceof Error
+          ? `Sambungan gagal: ${error.message}`
+          : 'Sambungan Supabase gagal. Sila semak konfigurasi dan rangkaian.',
+      );
+    }
+  };
+
+  const handleResetDefaults = async () => {
+    if (
+      !window.confirm(
+        'Adakah anda pasti ingin memulihkan harga dan tetapan kedai ke nilai asal? Poster promosi tidak akan dipadam.',
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await onResetDefaults();
+      onClose();
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : 'Gagal memulihkan data asal.',
+      );
     }
   };
 
@@ -590,15 +869,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               <p className="mt-2.5 text-sm text-maroon-deep/60">{todayLabel}</p>
             </div>
             {activeTab === 'prices' && (
-              <button
-                type="button"
-                onClick={handleSavePrices}
-                disabled={priceSaving}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Save className="size-4" />
-                {priceSaving ? 'Menyimpan...' : 'Simpan harga'}
-              </button>
+              <div className="inline-flex items-center gap-2.5 self-start rounded-xl border border-line/25 bg-[#fbf6ef] px-4 py-2.5 sm:self-auto">
+                <CalendarClock className="size-4 shrink-0 text-gold-deep" />
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-maroon-deep/45">
+                    Kemaskini Terakhir
+                  </p>
+                  <p className="text-sm font-semibold tabular-nums text-maroon-deep">
+                    {lastUpdatedLabel}
+                  </p>
+                </div>
+              </div>
             )}
             {activeTab === 'promos' && (
               <button
@@ -613,211 +894,323 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             )}
           </div>
 
-          <div className="mt-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard
-              icon={LayoutDashboard}
-              label="Emas 999"
-              value={formatMYR(prices['999'].sellPrice)}
-              hint={`Beli semula ${formatMYR(prices['999'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
-            />
-            <StatCard
-              icon={Coins}
-              label="Emas 916"
-              value={formatMYR(prices['916'].sellPrice)}
-              hint={`Beli semula ${formatMYR(prices['916'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
-              accent="cream"
-            />
-            <StatCard
-              icon={ImageIcon}
-              label="Poster aktif"
-              value={String(activePromoCount)}
-              hint={`${draftPromos.length} poster keseluruhan`}
-              accent="success"
-            />
-            <StatCard
-              icon={History}
-              label="Log harga"
-              value={String(history.length)}
-              hint="Rekod perubahan kaunter"
-              accent="warm"
-            />
-          </div>
+          {activeTab !== 'prices' && (
+            <div className="mt-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <StatCard
+                icon={LayoutDashboard}
+                label="Emas 999"
+                value={formatMYR(prices['999'].sellPrice)}
+                hint={`Beli semula ${formatMYR(prices['999'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
+              />
+              <StatCard
+                icon={Coins}
+                label="Emas 916"
+                value={formatMYR(prices['916'].sellPrice)}
+                hint={`Beli semula ${formatMYR(prices['916'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
+                accent="cream"
+              />
+              <StatCard
+                icon={ImageIcon}
+                label="Poster aktif"
+                value={String(activePromoCount)}
+                hint={`${draftPromos.length} poster keseluruhan`}
+                accent="success"
+              />
+              <StatCard
+                icon={History}
+                label="Log harga"
+                value={String(history.length)}
+                hint="Rekod perubahan kaunter"
+                accent="warm"
+              />
+            </div>
+          )}
 
           {activeTab === 'prices' && (
             <>
-              {/* STEP 1: choose which outlet/kiosk to update */}
-              <section className="gr-card-light mt-6 p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              {/* Bahagian 1: penyelarasan pantas harga asas HQ */}
+              <section className="gr-card-light mt-6 overflow-hidden">
+                <div className="flex flex-col gap-3 border-b border-line/15 p-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <p className="gr-kicker text-maroon">Langkah 1</p>
-                    <p className="mt-1.5 font-heading text-xl text-maroon-deep">Pilih outlet / kiosk</p>
-                    <p className="mt-1 text-sm text-maroon-deep/55">
-                      Setiap outlet menyimpan harga jual dan beli semula yang berasingan.
-                    </p>
-                  </div>
-                  <div className="w-full sm:w-80">
-                    <label className={labelClass}>Outlet untuk dikemaskini</label>
-                    <OutletSelect
-                      outlets={outletOptions}
-                      selected={currentOutletName}
-                      onSelect={handleSelectOutlet}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* STEP 2: edit the selected outlet's prices */}
-              <section className="gr-card-light mt-4 overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/15 p-5">
-                  <div className="min-w-0">
-                    <p className="gr-kicker text-maroon">Langkah 2</p>
+                    <p className="gr-kicker text-maroon">Penyelarasan Pantas</p>
                     <p className="mt-1.5 font-heading text-xl text-maroon-deep">
-                      Harga emas {currentOutletName || 'outlet ini'}
+                      Harga Asas HQ
                     </p>
-                    <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
+                    <p className="mt-1 text-sm text-maroon-deep/55">
+                      Tetapkan harga rujukan HQ (RM / gram), kemudian salin ke semua
+                      outlet dalam satu klik.
+                    </p>
                   </div>
-                  {priceSuccessMsg && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/30 bg-[#eef8f1] px-3 py-1.5 text-xs font-semibold text-[#3f835b]">
-                      <Check className="size-3.5" />
-                      {priceSuccessMsg}
-                    </span>
-                  )}
-                  {priceError && (
-                    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-rose-700/30 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700">
-                      <X className="size-3.5 shrink-0" />
-                      <span className="truncate">{priceError}</span>
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleCopyHqToAll}
+                    disabled={matrixOutlets.length === 0}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Copy className="size-4" />
+                    Salin ke Semua 5 Outlet
+                  </button>
                 </div>
 
-                <div className="space-y-5 p-5">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    {(['999', '916', '375'] as GoldPurity[]).map((purity) => {
-                      const item = draftPrices[purity];
-                      return (
-                        <article key={purity} className="rounded-xl border border-line/15 bg-[#fbf6ef] p-4">
-                          <div className="flex items-center justify-between border-b border-line/15 pb-3">
-                            <div>
-                              <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-maroon-deep/45">
-                                {item.karat}
-                              </p>
-                              <p className="mt-1 font-heading text-xl leading-none text-maroon-deep">
-                                Emas {purity}
-                              </p>
-                            </div>
-                            <span className="rounded-md border border-gold-deep/20 bg-gold/10 px-2 py-1 text-[10px] font-semibold text-maroon">
-                              {item.fineness}
-                            </span>
-                          </div>
+                <div className="space-y-3 p-5">
+                  {PURITY_ROWS.map((row) => (
+                    <div
+                      key={row.id}
+                      className="grid items-end gap-3 rounded-xl border border-line/15 bg-[#fbf6ef] p-3.5 sm:grid-cols-[7.5rem_1fr] lg:grid-cols-[7.5rem_1fr_1fr]"
+                    >
+                      <div className="sm:pt-1">
+                        <p className="font-heading text-lg leading-none text-maroon-deep">
+                          {row.id}
+                        </p>
+                        <span className="mt-1.5 inline-block rounded border border-gold-deep/20 bg-gold/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
+                          {row.karat}
+                        </span>
+                      </div>
+                      <HqPriceControl
+                        label="Jual"
+                        tone="sell"
+                        purity={row.id}
+                        value={hqBase[row.id].sellPrice}
+                        onChange={(value) => updateHqBase(row.id, 'sellPrice', value)}
+                      />
+                      <HqPriceControl
+                        label="Beli"
+                        tone="buy"
+                        purity={row.id}
+                        value={hqBase[row.id].buyPrice}
+                        onChange={(value) => updateHqBase(row.id, 'buyPrice', value)}
+                      />
+                    </div>
+                  ))}
+                </div>
 
-                          <PriceField
-                            label="Harga jual"
-                            value={item.sellPrice}
-                            onChange={(value) =>
-                              setDraftPrices({
-                                ...draftPrices,
-                                [purity]: { ...item, sellPrice: value },
-                              })
-                            }
-                          />
-                          <PriceField
-                            label="Beli semula"
-                            value={item.buyPrice}
-                            onChange={(value) =>
-                              setDraftPrices({
-                                ...draftPrices,
-                                [purity]: { ...item, buyPrice: value },
-                              })
-                            }
-                          />
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                  <div>
-                    <label className={labelClass}>Catatan perubahan</label>
-                    <input
-                      type="text"
-                      value={priceNote}
-                      onChange={(e) => setPriceNote(e.target.value)}
-                      placeholder="cth: Pelarasan harga petang mengikut pasaran"
-                      className={fieldClass}
-                    />
-                    <p className="mt-1.5 text-[11px] text-maroon-deep/45">
-                      Catatan ini disimpan dalam log sejarah.
+                <div className="space-y-2 border-t border-line/15 px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] text-maroon-deep/50">
+                      {matrixOutlets.length} daripada 5 lajur outlet berdaftar dalam
+                      Supabase.
                     </p>
+                    {copyNotice && (
+                      <p className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/25 bg-[#eef8f1] px-3 py-1 text-[11px] font-semibold text-[#3f835b]">
+                        <Check className="size-3.5 shrink-0" />
+                        {copyNotice}
+                      </p>
+                    )}
                   </div>
+                  {matrixOutlets.length < 5 && (
+                    <p className="text-[11px] leading-relaxed text-maroon-deep/40">
+                      Lajur yang belum berdaftar dipaparkan sebagai tempat letak kosong.
+                      Daftarkan outlet baharu dalam Supabase untuk membuka lajur
+                      tambahan.
+                    </p>
+                  )}
                 </div>
               </section>
 
-              {/* Overview: current prices of every outlet */}
+              {/* Bahagian 2: matriks harga semua outlet */}
               <section className="gr-card-light mt-4 overflow-hidden">
-                <div className="border-b border-line/15 p-5">
-                  <p className="gr-kicker text-maroon">Semua outlet</p>
-                  <p className="mt-1.5 font-heading text-xl text-maroon-deep">Perbandingan harga jual</p>
-                  <p className="mt-1 text-sm text-maroon-deep/55">
-                    Harga jual semasa setiap outlet/kiosk. Pilih mana-mana baris untuk mula mengemaskini.
+                <div className="flex flex-col gap-3 border-b border-line/15 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="gr-kicker text-maroon">Matriks Harga</p>
+                    <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                      Harga Jual & Beli Semula
+                    </p>
+                    <p className="mt-1 text-sm text-maroon-deep/55">
+                      Edit terus dalam sel. Setiap lajur mewakili satu outlet berdaftar.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4f9d6e]/25 bg-[#eef8f1] px-2.5 py-1 text-[10px] font-semibold text-[#3f835b]">
+                      <span className="size-1.5 rounded-full bg-[#4f9d6e]" />
+                      Jual
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#c08a3e]/25 bg-[#fdf4e3] px-2.5 py-1 text-[10px] font-semibold text-[#8a5a1d]">
+                      <span className="size-1.5 rounded-full bg-[#c08a3e]" />
+                      Beli
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1020px] border-collapse text-left">
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                          className="sticky left-0 z-10 w-[10rem] border-b border-r border-line/15 bg-[#f3e8d8] px-4 py-3"
+                        >
+                          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-maroon-deep/45">
+                            Ketulenan
+                          </span>
+                        </th>
+                        {outletSlots.map((slot) => (
+                          <th
+                            key={slot.slotNumber}
+                            scope="col"
+                            className="min-w-[11.5rem] border-b border-r border-line/15 bg-[#f3e8d8] px-3 py-3 last:border-r-0"
+                          >
+                            <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-maroon-deep/45">
+                              Outlet {slot.slotNumber}
+                              {slot.isHq && (
+                                <span className="rounded bg-maroon px-1.5 py-0.5 text-[8px] font-bold tracking-[0.08em] text-gold-soft">
+                                  HQ
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              title={slot.outletName ?? 'Belum didaftarkan'}
+                              className={`mt-1 block truncate text-sm font-semibold ${
+                                slot.outletName ? 'text-maroon-deep' : 'text-maroon-deep/35'
+                              }`}
+                            >
+                              {slot.outletName ?? 'Belum didaftarkan'}
+                            </span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {PURITY_ROWS.map((row, rowIndex) => (
+                        <tr
+                          key={row.id}
+                          className={rowIndex % 2 === 0 ? 'bg-white/50' : 'bg-[#fbf6ef]'}
+                        >
+                          <th
+                            scope="row"
+                            className={`sticky left-0 z-10 border-b border-r border-line/15 px-4 py-4 align-middle ${
+                              rowIndex % 2 === 0 ? 'bg-[#fffdf9]' : 'bg-[#fbf6ef]'
+                            }`}
+                          >
+                            <p className="font-heading text-base leading-tight text-maroon-deep">
+                              Emas {row.id}
+                            </p>
+                            <span className="mt-1.5 inline-block rounded border border-gold-deep/20 bg-gold/10 px-1.5 py-0.5 text-[9px] font-semibold text-maroon">
+                              {row.karat}
+                            </span>
+                          </th>
+                          {outletSlots.map((slot) => {
+                            const outletName = slot.outletName;
+                            if (!outletName) {
+                              return (
+                                <td
+                                  key={`${row.id}-${slot.slotNumber}`}
+                                  className="border-b border-r border-line/15 px-3 py-3 align-top last:border-r-0"
+                                >
+                                  <div className="rounded-lg border border-dashed border-line/30 bg-[#fbf6ef]/70 px-3 py-4 text-center">
+                                    <p className="text-[10px] font-semibold text-maroon-deep/40">
+                                      Belum didaftarkan
+                                    </p>
+                                    <p className="mt-1 text-[9px] leading-relaxed text-maroon-deep/30">
+                                      Buka lajur selepas outlet didaftarkan.
+                                    </p>
+                                  </div>
+                                </td>
+                              );
+                            }
+
+                            return (
+                              <td
+                                key={`${row.id}-${slot.slotNumber}`}
+                                className="border-b border-r border-line/15 px-3 py-3 align-top last:border-r-0"
+                              >
+                                <MatrixPriceInput
+                                  label="Jual"
+                                  tone="sell"
+                                  purity={row.id}
+                                  outletName={outletName}
+                                  value={matrix[outletName]?.[row.id]?.sellPrice ?? 0}
+                                  onChange={(value) =>
+                                    updateCell(outletName, row.id, 'sellPrice', value)
+                                  }
+                                />
+                                <MatrixPriceInput
+                                  label="Beli"
+                                  tone="buy"
+                                  purity={row.id}
+                                  outletName={outletName}
+                                  value={matrix[outletName]?.[row.id]?.buyPrice ?? 0}
+                                  onChange={(value) =>
+                                    updateCell(outletName, row.id, 'buyPrice', value)
+                                  }
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="border-t border-line/15 p-5">
+                  <label className={labelClass}>Catatan perubahan</label>
+                  <input
+                    type="text"
+                    value={priceNote}
+                    onChange={(e) => setPriceNote(e.target.value)}
+                    placeholder="cth: Pelarasan harga petang mengikut pasaran"
+                    className={fieldClass}
+                  />
+                  <p className="mt-1.5 text-[11px] text-maroon-deep/45">
+                    Catatan ini disimpan dalam log sejarah setiap outlet.
                   </p>
                 </div>
-                <div className="divide-y divide-line/10">
-                  {outletOptions.map((name) => {
-                    const outletPriceMap = outletPrices[name];
-                    const isActive = name === currentOutletName;
-                    return (
-                      <div
-                        key={name}
-                        className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <MapPin
-                              className={`size-3.5 shrink-0 ${
-                                isActive ? 'text-gold-deep' : 'text-maroon-deep/35'
-                              }`}
-                            />
-                            <p className="truncate font-heading text-lg leading-none text-maroon-deep">
-                              {name}
-                            </p>
-                            {isActive && (
-                              <span className="rounded-full border border-gold-deep/25 bg-gold/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-maroon">
-                                Dipilih
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {(['999', '916', '375'] as GoldPurity[]).map((purity) => (
-                              <span
-                                key={purity}
-                                className="rounded-md border border-line/15 bg-[#fbf6ef] px-2 py-1 text-[10px] font-semibold tabular-nums text-maroon-deep/70"
-                              >
-                                {purity} · {formatMYR(outletPriceMap?.[purity]?.sellPrice ?? 0)}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectOutlet(name)}
-                          disabled={isActive}
-                          className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors ${
-                            isActive
-                              ? 'cursor-default bg-gold/15 text-maroon'
-                              : 'border border-line/25 bg-[#fffdf9] text-maroon hover:border-gold-deep/40 hover:bg-gold/10'
-                          }`}
-                        >
-                          {isActive ? (
-                            <Check className="size-3.5" />
-                          ) : (
-                            <PencilLine className="size-3.5 text-gold-deep" />
-                          )}
-                          {isActive ? 'Sedang diedit' : 'Ubah harga'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
               </section>
+
+              {/* Bar tindakan melekat di bawah skrin */}
+              <div className="sticky bottom-0 z-20 -mx-4 mt-5 border-t border-line/25 bg-cream-page/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p
+                      className={`flex items-center gap-1.5 text-xs font-semibold ${
+                        matrixDirty ? 'text-[#a34a26]' : 'text-[#3f835b]'
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          matrixDirty ? 'bg-[#c08a3e]' : 'bg-[#4f9d6e]'
+                        }`}
+                      />
+                      {matrixDirty
+                        ? 'Ada perubahan harga yang belum disimpan.'
+                        : 'Semua harga segerak dengan server.'}
+                    </p>
+                    {priceError && (
+                      <p
+                        role="alert"
+                        className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-relaxed text-rose-700"
+                      >
+                        <X className="mt-0.5 size-3.5 shrink-0" />
+                        {priceError}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleResetMatrix}
+                      disabled={priceSaving}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/30 bg-[#fbf6ef] px-4 text-sm font-semibold text-maroon transition-colors hover:border-gold-deep/40 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCcw className="size-4" />
+                      Set Semula
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveMatrix()}
+                      disabled={priceSaving}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {priceSaving ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                      {priceSaving ? 'Menyimpan...' : 'Simpan & Siarkan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </>
           )}
 
@@ -1110,112 +1503,199 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           )}
 
           {activeTab === 'settings' && (
-            <section className="gr-card-light mt-6 overflow-hidden">
-              <div className="border-b border-line/15 p-5">
-                <p className="gr-kicker text-maroon">Profil kedai</p>
-                <p className="mt-1.5 font-heading text-xl text-maroon-deep">Tetapan cawangan</p>
-                <p className="mt-1 text-sm text-maroon-deep/55">{page.description}</p>
-              </div>
-              <form onSubmit={handleSaveSettings} className="max-w-xl space-y-4 p-5">
-                {settingsSuccess && (
-                  <div className="flex items-center gap-2 rounded-xl border border-[#4f9d6e]/25 bg-[#eef8f1] px-3 py-2.5 text-xs font-semibold text-[#3f835b]">
-                    <Check className="size-4" />
-                    {settingsSuccess}
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <section className="gr-card-light overflow-hidden lg:col-span-2">
+                <div className="border-b border-line/15 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-gold-deep/25 bg-gold/10 text-gold-deep">
+                        <Database className="size-5" />
+                      </span>
+                      <div>
+                        <p className="gr-kicker text-maroon">Sambungan</p>
+                        <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                          Supabase
+                        </p>
+                        <p className="mt-1 text-sm text-maroon-deep/55">
+                          {page.description}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
+                        isSupabaseConfigured
+                          ? 'border-[#4f9d6e]/30 bg-[#eef8f1] text-[#3f835b]'
+                          : 'border-rose-300/50 bg-rose-50 text-rose-800'
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          isSupabaseConfigured ? 'bg-[#4f9d6e]' : 'bg-rose-500'
+                        }`}
+                      />
+                      {isSupabaseConfigured ? 'Dikonfigurasi' : 'Belum dikonfigurasi'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+                  <SettingsValue
+                    label="Project URL"
+                    value={supabaseConfig.url || 'Tidak ditetapkan'}
+                    mono
+                  />
+                  <SettingsValue
+                    label="Project ref"
+                    value={supabaseConfig.projectRef || '—'}
+                    mono
+                  />
+                  <SettingsValue
+                    label="Anon key"
+                    value={supabaseConfig.anonKeyPreview || 'Tidak ditetapkan'}
+                    mono
+                  />
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-line/15 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="flex items-start gap-2 text-xs leading-relaxed text-maroon-deep/55">
+                    <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#3f835b]" />
+                    Hanya kunci anon awam digunakan oleh klien. Jangan masukkan
+                    kunci service_role ke dalam aplikasi.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {supabaseConfig.projectRef && (
+                      <a
+                        href={`https://supabase.com/dashboard/project/${supabaseConfig.projectRef}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/25 bg-[#fbf6ef] px-4 text-xs font-semibold text-maroon-deep/75 transition-colors hover:border-gold-deep/35 hover:bg-white"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        Dashboard
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleTestSupabaseConnection()}
+                      disabled={supabaseTestState === 'testing' || !isSupabaseConfigured}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-xs font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {supabaseTestState === 'testing' ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-3.5" />
+                      )}
+                      {supabaseTestState === 'testing'
+                        ? 'Menguji...'
+                        : 'Uji sambungan'}
+                    </button>
+                  </div>
+                </div>
+
+                {supabaseTestMessage && (
+                  <div
+                    className={`mx-5 mb-5 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs ${
+                      supabaseTestState === 'success'
+                        ? 'border-[#4f9d6e]/25 bg-[#eef8f1] font-semibold text-[#3f835b]'
+                        : 'border-rose-300/50 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    {supabaseTestState === 'success' ? (
+                      <Check className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <X className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <span>{supabaseTestMessage}</span>
                   </div>
                 )}
-                {settingsError && (
-                  <div className="rounded-xl border border-rose-300/50 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
-                    {settingsError}
-                  </div>
-                )}
-                <div>
-                  <label className={labelClass}>Nama kedai emas</label>
-                  <input
-                    type="text"
-                    value={draftSettings.shopName}
-                    onChange={(e) => setDraftSettings({ ...draftSettings, shopName: e.target.value })}
-                    className={fieldClass}
+              </section>
+
+              <section className="gr-card-light p-5">
+                <p className="gr-kicker text-maroon">Sesi</p>
+                <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                  Identiti & outlet
+                </p>
+                <dl className="mt-4 space-y-3">
+                  <SettingsRow label="Pentadbir" value={adminLabel || 'Admin'} />
+                  <SettingsRow
+                    label="Outlet aktif"
+                    value={currentOutletName || 'Belum dipilih'}
                   />
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className={labelClass}>Cawangan</label>
-                    <input
-                      type="text"
-                      value={draftSettings.branch}
-                      onChange={(e) => setDraftSettings({ ...draftSettings, branch: e.target.value })}
-                      className={fieldClass}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Telefon / WhatsApp</label>
-                    <input
-                      type="text"
-                      value={draftSettings.phone}
-                      onChange={(e) => setDraftSettings({ ...draftSettings, phone: e.target.value })}
-                      className={fieldClass}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelClass}>Alamat kedai</label>
-                  <input
-                    type="text"
-                    value={draftSettings.address}
-                    onChange={(e) => setDraftSettings({ ...draftSettings, address: e.target.value })}
-                    className={fieldClass}
+                  <SettingsRow
+                    label="Outlet tersedia"
+                    value={`${availableOutlets.length} outlet`}
                   />
-                </div>
-                <div>
-                  <label className={labelClass}>Slogan</label>
-                  <input
-                    type="text"
-                    value={draftSettings.tagline}
-                    onChange={(e) => setDraftSettings({ ...draftSettings, tagline: e.target.value })}
-                    className={fieldClass}
+                  <SettingsRow
+                    label="Mod paparan"
+                    value={isStandalonePwa() ? 'PWA standalone' : 'Pelayar web'}
                   />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <SettingsRow
+                    label="Segerak masa nyata"
+                    value={isSupabaseConfigured ? 'Aktif' : 'Tidak aktif'}
+                  />
+                  <SettingsRow label="Penyegaran harga" value="Setiap 60 saat" />
+                </dl>
+              </section>
+
+              <section className="gr-card-light p-5">
+                <p className="gr-kicker text-maroon">Penyelenggaraan</p>
+                <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                  Data & aplikasi
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-maroon-deep/55">
+                  Harga, poster dan tetapan dibaca terus daripada Supabase.
+                  Pulihkan data asal atau muat semula aplikasi selepas
+                  konfigurasi berubah.
+                </p>
+                <div className="mt-5 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (
-                        !window.confirm(
-                          'Adakah anda pasti ingin memulihkan harga dan tetapan kedai ke nilai asal? Poster promosi tidak akan dipadam.',
-                        )
-                      ) {
-                        return;
-                      }
-                      try {
-                        await onResetDefaults();
-                        onClose();
-                      } catch (error) {
-                        window.alert(
-                          error instanceof Error
-                            ? error.message
-                            : 'Gagal memulihkan data asal.',
-                        );
-                      }
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#a34a26] hover:text-[#7c2727]"
+                    onClick={() => void handleResetDefaults()}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/25 bg-[#fbf6ef] px-4 text-xs font-semibold text-[#a34a26] transition-colors hover:border-[#a34a26]/40 hover:bg-white"
                   >
                     <RotateCcw className="size-3.5" />
                     Pulihkan data asal
                   </button>
                   <button
-                    type="submit"
-                    disabled={settingsSaving}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/25 bg-[#fbf6ef] px-4 text-xs font-semibold text-maroon-deep/75 transition-colors hover:border-gold-deep/35 hover:bg-white"
                   >
-                    {settingsSaving && <Loader2 className="size-4 animate-spin" />}
-                    {settingsSaving ? 'Menyimpan...' : 'Simpan tetapan'}
+                    <RefreshCw className="size-3.5" />
+                    Muat semula aplikasi
                   </button>
                 </div>
-              </form>
-            </section>
+              </section>
+            </div>
           )}
         </main>
       </div>
+
+      {priceSuccessMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-24 right-4 z-[60] flex max-w-[min(22rem,calc(100vw-2rem))] items-start gap-2.5 rounded-xl border border-[#4f9d6e]/30 bg-[#eef8f1] px-4 py-3 shadow-[0_20px_45px_-20px_rgba(59,7,7,0.45)] sm:right-6"
+        >
+          <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[#4f9d6e] text-white">
+            <Check className="size-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[#2f6b47]">{priceSuccessMsg}</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-[#3f835b]/85">
+              Perubahan harga telah disiarkan ke tablet semua outlet.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPriceSuccessMsg('')}
+            aria-label="Tutup pemberitahuan"
+            className="ml-1 rounded p-0.5 text-[#3f835b]/60 transition-colors hover:text-[#2f6b47]"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
 
       {navOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
@@ -1242,118 +1722,168 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   );
 };
 
-function PriceField({
+function SettingsValue({
   label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-line/15 bg-[#fbf6ef] px-4 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-maroon-deep/45">
+        {label}
+      </p>
+      <p
+        title={value}
+        className={`mt-1 break-all text-maroon-deep ${
+          mono ? 'font-mono text-xs leading-relaxed' : 'text-sm font-semibold'
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function SettingsRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-line/10 pb-3 last:border-0 last:pb-0">
+      <dt className="shrink-0 text-xs text-maroon-deep/55">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-sm font-semibold text-maroon-deep">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function HqPriceControl({
+  label,
+  tone,
+  purity,
   value,
   onChange,
 }: {
   label: string;
+  tone: 'sell' | 'buy';
+  purity: GoldPurity;
   value: number;
   onChange: (value: number) => void;
 }) {
+  const isSell = tone === 'sell';
+
   return (
-    <div className="pt-3">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <label className="text-[11px] font-semibold text-maroon-deep/70">{label}</label>
-        <span className="text-xs font-semibold tabular-nums text-maroon">{formatMYR(value)}</span>
+    <div className="min-w-0">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] ${
+            isSell
+              ? 'bg-[#e4f3e9] text-[#2f6b47]'
+              : 'bg-[#fbefd8] text-[#8a5a1d]'
+          }`}
+        >
+          {label}
+        </span>
+        <span className="text-[10px] font-medium text-maroon-deep/40">RM / gram</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <div className="relative min-w-0 flex-1">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-maroon-deep/35">
+            RM
+          </span>
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            value={value === 0 ? '' : value}
+            placeholder="0.00"
+            onChange={(e) => {
+              const parsed = Number.parseFloat(e.target.value);
+              onChange(Number.isFinite(parsed) ? Math.max(0, parsed) : 0);
+            }}
+            aria-label={`Harga ${label} emas ${purity}`}
+            className={`h-10 w-full rounded-lg border pl-8 pr-2.5 text-sm font-semibold tabular-nums text-maroon-deep placeholder:font-normal placeholder:text-maroon-deep/30 focus:outline-none focus:ring-2 ${
+              isSell
+                ? 'border-[#4f9d6e]/25 bg-[#f4faf6] focus:border-[#4f9d6e]/50 focus:ring-[#4f9d6e]/15'
+                : 'border-[#c08a3e]/25 bg-[#fdf8ee] focus:border-[#c08a3e]/50 focus:ring-[#c08a3e]/15'
+            }`}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, Number((value - 1).toFixed(2))))}
+          aria-label={`Tolak RM1 ${label} emas ${purity}`}
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-line/25 bg-white text-[11px] font-bold text-maroon-deep/70 transition-colors hover:border-maroon/30 hover:bg-[#fbf6ef]"
+        >
+          -1
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(Number((value + 1).toFixed(2)))}
+          aria-label={`Tambah RM1 ${label} emas ${purity}`}
+          className="grid size-9 shrink-0 place-items-center rounded-lg border border-line/25 bg-white text-[11px] font-bold text-maroon-deep/70 transition-colors hover:border-maroon/30 hover:bg-[#fbf6ef]"
+        >
+          +1
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MatrixPriceInput({
+  label,
+  tone,
+  purity,
+  outletName,
+  value,
+  onChange,
+}: {
+  label: string;
+  tone: 'sell' | 'buy';
+  purity: GoldPurity;
+  outletName: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const isSell = tone === 'sell';
+
+  return (
+    <div className="px-0.5 py-1 first:pt-0 last:pb-0">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span
+          className={`rounded px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] ${
+            isSell
+              ? 'bg-[#e4f3e9] text-[#2f6b47]'
+              : 'bg-[#fbefd8] text-[#8a5a1d]'
+          }`}
+        >
+          {label}
+        </span>
+        <span className="text-[10px] font-semibold tabular-nums text-maroon-deep/40">
+          RM
+        </span>
       </div>
       <input
         type="number"
         inputMode="decimal"
         step="0.01"
         min="0"
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className={`${fieldClass} font-semibold tabular-nums`}
+        value={value === 0 ? '' : value}
+        placeholder="0.00"
+        onChange={(e) => {
+          const parsed = Number.parseFloat(e.target.value);
+          onChange(Number.isFinite(parsed) ? Math.max(0, parsed) : 0);
+        }}
+        aria-label={`Harga ${label} emas ${purity} di ${outletName}`}
+        className={`h-9 w-full rounded-lg border px-2.5 text-sm font-semibold tabular-nums text-maroon-deep placeholder:font-normal placeholder:text-maroon-deep/30 focus:outline-none focus:ring-2 ${
+          isSell
+            ? 'border-[#4f9d6e]/20 bg-[#f4faf6] focus:border-[#4f9d6e]/45 focus:ring-[#4f9d6e]/15'
+            : 'border-[#c08a3e]/20 bg-[#fdf8ee] focus:border-[#c08a3e]/45 focus:ring-[#c08a3e]/15'
+        }`}
       />
-    </div>
-  );
-}
-
-/**
- * Dropdown to pick which outlet/kiosk the admin is updating prices for.
- * Selecting an outlet calls `onSelect`, which reloads all outlet-scoped data.
- */
-function OutletSelect({
-  outlets,
-  selected,
-  onSelect,
-}: {
-  outlets: string[];
-  selected: string;
-  onSelect: (name: string) => void;
-}) {
-  const [open, setOpen] = useState<boolean>(false);
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className={`${fieldClass} flex items-center justify-between gap-2 text-left`}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <MapPin className="size-4 shrink-0 text-gold-deep" />
-          <span className="truncate">{selected || 'Pilih outlet'}</span>
-        </span>
-        <ChevronDown
-          className={`size-4 shrink-0 text-maroon-deep/50 transition-transform ${
-            open ? 'rotate-180' : ''
-          }`}
-        />
-      </button>
-
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Tutup senarai outlet"
-            className="fixed inset-0 z-10 cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div
-            role="listbox"
-            className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-line bg-[#fbf6ef] p-1 shadow-[0_18px_40px_-18px_rgba(59,7,7,0.55)]"
-          >
-            {outlets.length === 0 ? (
-              <p className="px-3 py-3 text-center text-xs leading-relaxed text-maroon-deep/55">
-                Tiada outlet awam ditemui. Pastikan outlet berdaftar dengan
-                <span className="font-semibold"> role = &apos;outlet&apos; </span>
-                di Supabase.
-              </p>
-            ) : (
-              outlets.map((name) => {
-                const isActive = name === selected;
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    onClick={() => {
-                      onSelect(name);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
-                      isActive ? 'bg-gold/15 text-maroon' : 'text-maroon-deep hover:bg-gold/10'
-                    }`}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <MapPin
-                        className={`size-3.5 shrink-0 ${isActive ? 'text-gold-deep' : 'text-maroon-deep/40'}`}
-                      />
-                      <span className="truncate">{name}</span>
-                    </span>
-                    {isActive && <Check className="size-3.5 shrink-0 text-gold-deep" />}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </>
-      )}
     </div>
   );
 }

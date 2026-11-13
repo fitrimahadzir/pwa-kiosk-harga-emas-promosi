@@ -302,16 +302,6 @@ export default function App() {
     window.location.hash = '/';
   }, []);
 
-  /** Switch the active outlet (used by the admin price editor too). */
-  const selectOutlet = useCallback(
-    (outletName: string) => {
-      if (!outletName || outletName === currentOutletName) return;
-      saveCurrentOutletName(outletName);
-      setCurrentOutletName(outletName);
-    },
-    [currentOutletName],
-  );
-
   // A persisted admin session opened directly on #/admin may have no outlet
   // selected yet — pick a valid one so the price editor is always usable.
   useEffect(() => {
@@ -398,59 +388,73 @@ export default function App() {
   };
 
   /**
-   * Admin-only write path. The database re-checks `is_kiosk_admin()`; a
-   * rejected write throws so the UI never reports a false success.
+   * Batch write for the daily price matrix: simpan harga beberapa outlet
+   * dalam satu tindakan "Simpan & Siarkan". Setiap baris tetap melalui RLS
+   * admin di server; ralat pertama menghentikan proses dan dilaporkan di UI.
    */
-  const handleUpdatePrices = async (
-    newPrices: Record<GoldPurity, GoldPriceItem>,
+  const handleUpdateAllPrices = async (
+    updates: { outletName: string; prices: Record<GoldPurity, GoldPriceItem> }[],
     note: string,
   ): Promise<void> => {
     if (!adminSession) {
       throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
     }
-
-    const outletName = currentOutletName;
-    if (!outletName) {
-      throw new Error('Tiada outlet dipilih.');
+    if (updates.length === 0) {
+      throw new Error('Tiada outlet berdaftar untuk disimpan.');
     }
 
-    for (const purity of PURITIES) {
-      const item = newPrices[purity];
-      if (!item) throw new Error(`Harga ${purity} tidak lengkap.`);
-      if (!Number.isFinite(item.sellPrice) || item.sellPrice <= 0) {
-        throw new Error(`Harga jual ${purity} mesti lebih besar daripada 0.`);
-      }
-      if (!Number.isFinite(item.buyPrice) || item.buyPrice < 0) {
-        throw new Error(`Harga beli ${purity} tidak sah.`);
-      }
-      if (item.buyPrice > item.sellPrice) {
-        throw new Error(`Harga beli ${purity} tidak boleh melebihi harga jual.`);
+    for (const { outletName, prices: outletPrice } of updates) {
+      for (const purity of PURITIES) {
+        const item = outletPrice[purity];
+        if (!item) throw new Error(`Harga ${purity} ${outletName} tidak lengkap.`);
+        if (!Number.isFinite(item.sellPrice) || item.sellPrice <= 0) {
+          throw new Error(`Harga jual ${purity} di ${outletName} mesti lebih besar daripada 0.`);
+        }
+        if (!Number.isFinite(item.buyPrice) || item.buyPrice < 0) {
+          throw new Error(`Harga beli ${purity} di ${outletName} tidak sah.`);
+        }
+        if (item.buyPrice > item.sellPrice) {
+          throw new Error(
+            `Harga beli ${purity} di ${outletName} tidak boleh melebihi harga jual.`,
+          );
+        }
       }
     }
 
     const timestamp = new Date().toISOString();
-    const previous = prices;
-    const next = {} as Record<GoldPurity, GoldPriceItem>;
+    const prepared = updates.map(({ outletName, prices: newPrices }) => {
+      const previous =
+        outletName === currentOutletName ? prices : outletPrices[outletName];
+      const next = {} as Record<GoldPurity, GoldPriceItem>;
 
-    for (const purity of PURITIES) {
-      const oldItem = previous[purity];
-      const newItem = newPrices[purity];
-      const changed =
-        !oldItem ||
-        oldItem.sellPrice !== newItem.sellPrice ||
-        oldItem.buyPrice !== newItem.buyPrice;
+      for (const purity of PURITIES) {
+        const oldItem = previous?.[purity];
+        const newItem = newPrices[purity];
+        const changed =
+          !oldItem ||
+          oldItem.sellPrice !== newItem.sellPrice ||
+          oldItem.buyPrice !== newItem.buyPrice;
 
-      next[purity] = {
-        ...newItem,
-        previousSellPrice: changed && oldItem ? oldItem.sellPrice : newItem.previousSellPrice,
-        updatedAt: timestamp,
-      };
+        next[purity] = {
+          ...newItem,
+          previousSellPrice:
+            changed && oldItem ? oldItem.sellPrice : newItem.previousSellPrice,
+          updatedAt: timestamp,
+        };
+      }
+
+      return { outletName, next };
+    });
+
+    // Throws if RLS rejects a write (e.g. session expired / not an admin).
+    // Tulisan dibuat bersiri supaya ralat pertama menghentikan baki baris.
+    for (const { outletName, next } of prepared) {
+      await pushOutletPrices(outletName, next, note);
     }
 
-    // Throws if RLS rejects the write (e.g. session expired / not an admin).
-    await pushOutletPrices(outletName, next, note);
+    const current = prepared.find((entry) => entry.outletName === currentOutletName);
+    if (current) setPrices(current.next);
 
-    setPrices(next);
     await Promise.all([refreshPrices(), refreshHistory(), refreshAllPrices()]);
   };
 
@@ -462,18 +466,6 @@ export default function App() {
 
     await pushPromos(newPromos);
     setPromos(await fetchPromos());
-  };
-
-  // Tetapan kedai disimpan di Supabase.
-  const handleUpdateSettings = async (newSettings: ShopSettings): Promise<void> => {
-    const outletName = currentOutletName;
-    if (!outletName) throw new Error('Tiada outlet dipilih.');
-    if (!adminSession) {
-      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
-    }
-
-    await pushOutletSettings(outletName, newSettings);
-    setSettings(await fetchOutletSettings(outletName));
   };
 
   // Reset harga + tetapan ke nilai asal (poster promosi tidak dipadam).
@@ -544,15 +536,12 @@ export default function App() {
           }}
           currentOutletName={currentOutletName ?? DEFAULT_SETTINGS.outletName}
           adminLabel={adminSession.email}
-          onSelectOutlet={selectOutlet}
           availableOutlets={availableOutlets}
           outletPrices={outletPrices}
           prices={prices}
-          onUpdatePrices={handleUpdatePrices}
+          onUpdateAllPrices={handleUpdateAllPrices}
           promos={promos}
           onUpdatePromos={handleUpdatePromos}
-          settings={settings}
-          onUpdateSettings={handleUpdateSettings}
           history={history}
           onResetDefaults={handleResetDefaults}
         />
@@ -605,7 +594,7 @@ export default function App() {
         </main>
       ) : (
         /* Main price board page */
-        <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-start landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
+        <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 content-center items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-center landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
           {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
               In portrait these become direct grid items so the poster can sit
               between them, while landscape keeps the original side-by-side layout.

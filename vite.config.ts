@@ -32,6 +32,9 @@ export default defineConfig(() => {
           scope: '/',
           display: 'standalone',
           display_override: ['standalone', 'fullscreen'],
+          // Default orientation for the installed kiosk PWA. The runtime guard
+          // (`useDeviceOrientation`) only locks landscape on tablets and
+          // releases the orientation on phones.
           orientation: 'landscape',
           background_color: '#5d0d0d',
           theme_color: '#5d0d0d',
