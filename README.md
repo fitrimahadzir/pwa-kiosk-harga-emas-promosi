@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/fitrimahadzir/pwa-kiosk-harga-emas-promosi/main/public/banner-promosi.svg" alt="Gold Reserve Banner" width="100%" />
+  <img src="https://raw.githubusercontent.com/fitrimahadzir/pwa-kiosk-harga-emas-promosi/main/public/images/banner-kekal.jpg" alt="Gold Reserve Banner" width="100%" />
 </div>
 
 ## 📖 Pengenalan
@@ -142,6 +142,9 @@ GEMINI_API_KEY="your_gemini_api_key_here"
    - mengaktifkan RLS pada semua jadual `kiosk_*`;
    - membuang **semua** INSERT/UPDATE/DELETE untuk `anon` (kiosk tidak boleh menulis);
    - membenarkan tulis hanya untuk pengguna yang tersenarai dalam `public.kiosk_admins`.
+   - menambah jadual `kiosk_announcement` untuk pengumuman kaunter global.
+   Jika pangkalan data sudah wujud sebelum ciri pengumuman, jalankan juga
+   `supabase/migrate-announcement.sql` (selamat dijalankan berulang kali).
 2. **Authentication → Users → Add user** — cipta akaun admin (e-mel + kata laluan).
 3. Daftarkan akaun itu sebagai pentadbir:
 
@@ -188,7 +191,7 @@ npm run lint
 2. Log masuk dengan **e-mel + kata laluan** akaun pentadbir Supabase Auth.
 3. Pilih outlet dan kemas kini harga emas (999, 916, 375).
 4. Klik **Simpan harga** — penulisan disahkan oleh RLS di server; kegagalan akan dipaparkan, bukan didiamkan.
-5. Promosi dan tetapan kedai disimpan pada cache peranti (tidak ditulis ke server).
+5. Buka tab **Pengumuman** (di bawah Promosi) untuk mengurus teks marquee yang berjalan di footer kiosk. Klik **Tambah teks** untuk memasukkan beberapa pengumuman — setiap satu dipaparkan bergilir. Teks disimpan secara global dalam `kiosk_announcement.message` (satu baris = satu entri) dan disegerakkan ke semua tablet outlet.
 
 ---
 
@@ -199,6 +202,7 @@ npm run lint
 | Halaman log masuk berputar-putar | Pastikan `.env.local` mempunyai `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY` |
 | Log masuk admin ditolak | Pastikan pengguna Auth didaftarkan dalam `public.kiosk_admins` (`is_active = true`) |
 | "Gagal menyimpan harga ke server" | Sesi admin tamat atau RLS menolak — log masuk semula dan jalankan `supabase/schema.sql` |
+| Gagal simpan pengumuman / jadual tiada | Jalankan `supabase/migrate-announcement.sql` dalam Supabase SQL Editor |
 | Font tidak muncul | Pastikan fail font berada di `public/font/The Seasons/` |
 | PWA tidak boleh dipasang | Pastikan HTTPS aktif atau gunakan localhost |
 

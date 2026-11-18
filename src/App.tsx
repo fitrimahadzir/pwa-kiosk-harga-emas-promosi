@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_PRICES,
   DEFAULT_SETTINGS,
+  DEFAULT_ANNOUNCEMENT,
   loadCurrentOutletName,
   saveCurrentOutletName,
   clearCurrentOutletName,
@@ -22,12 +23,15 @@ import {
   pushPromos,
   fetchOutletSettings,
   pushOutletSettings,
+  fetchAnnouncement,
+  pushAnnouncement,
   fetchOutletHistory,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { useLandscapeOrientation, usePromoStageHeight } from './hooks/usePromoStageHeight';
 import { Header } from './components/Header';
 import { GoldPriceBoard } from './components/GoldPriceBoard';
+import { AnnouncementTicker } from './components/AnnouncementTicker';
 import { PromoCarousel } from './components/PromoCarousel';
 import { QuotationModal } from './components/QuotationModal';
 import { AdminModal } from './components/AdminModal';
@@ -37,7 +41,7 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { getAdminSession, signInAdmin, signOutAdmin, type AdminSession } from './lib/auth';
 import { supabase } from './lib/supabase';
-import { Sparkles, Calculator, Loader2 } from 'lucide-react';
+import { Calculator, Loader2 } from 'lucide-react';
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
@@ -79,6 +83,7 @@ export default function App() {
   const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(DEFAULT_PRICES);
   const [promos, setPromos] = useState<PromoItem[]>([]);
   const [settings, setSettings] = useState<ShopSettings>(DEFAULT_SETTINGS);
+  const [announcement, setAnnouncement] = useState<string>(DEFAULT_ANNOUNCEMENT);
   const [history, setHistory] = useState<PriceHistoryEntry[]>([]);
 
   // All outlets shown in the pickers (public names only — role = 'outlet').
@@ -227,13 +232,15 @@ export default function App() {
     const outletName = currentOutletName;
     if (!outletName) return;
 
-    const [remotePromos, remoteSettings] = await Promise.all([
+    const [remotePromos, remoteSettings, remoteAnnouncement] = await Promise.all([
       fetchPromos(),
       fetchOutletSettings(outletName),
+      fetchAnnouncement(),
     ]);
 
     setPromos(remotePromos);
     setSettings(remoteSettings);
+    setAnnouncement(remoteAnnouncement.message);
   }, [currentOutletName]);
 
   const refreshHistory = useCallback(async () => {
@@ -258,6 +265,7 @@ export default function App() {
       setPrices(DEFAULT_PRICES);
       setPromos([]);
       setSettings(DEFAULT_SETTINGS);
+      setAnnouncement(DEFAULT_ANNOUNCEMENT);
       setHistory([]);
       return;
     }
@@ -468,6 +476,17 @@ export default function App() {
     setPromos(await fetchPromos());
   };
 
+  // Pengumuman kaunter adalah global (satu teks untuk semua outlet) di Supabase.
+  const handleUpdateAnnouncement = async (message: string): Promise<void> => {
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
+    }
+
+    await pushAnnouncement(message);
+    const saved = await fetchAnnouncement();
+    setAnnouncement(saved.message);
+  };
+
   // Reset harga + tetapan ke nilai asal (poster promosi tidak dipadam).
   const handleResetDefaults = async (): Promise<void> => {
     const outletName = currentOutletName;
@@ -542,6 +561,8 @@ export default function App() {
           onUpdateAllPrices={handleUpdateAllPrices}
           promos={promos}
           onUpdatePromos={handleUpdatePromos}
+          announcement={announcement}
+          onUpdateAnnouncement={handleUpdateAnnouncement}
           history={history}
           onResetDefaults={handleResetDefaults}
         />
@@ -615,11 +636,12 @@ export default function App() {
             </div>
 
             {/* Banner image: sits between the price board and calculator launcher.
-                Ratio 3:1 (e.g. 1800 × 600 px). Replace /images/banner-promosi.svg
-                with the permanent artwork, or point src to a .jpg/.png file. */}
+                Ratio 3:1 (3750 × 1250 px). Uses the permanent artwork
+                banner-kekal.jpg; /images/banner-promosi.svg is kept only as the
+                original placeholder and is no longer displayed. */}
             <div className="order-3 w-full overflow-hidden rounded-2xl border border-line/15 bg-[#2a0404] shadow-[0_16px_36px_-26px_rgba(59,7,7,0.45)]">
               <img
-                src="/images/banner-promosi.svg"
+                src="/images/banner-kekal.jpg"
                 alt="Banner promosi kedai emas"
                 className="block w-full aspect-[3/1] object-cover object-center"
                 loading="lazy"
@@ -675,13 +697,7 @@ export default function App() {
       {/* 3. FOOTER RUNNING TICKER / MARQUEE */}
       <div className="mx-auto w-full max-w-[1480px] px-4 pb-4 sm:px-6 lg:px-8">
         <footer className="gr-card-light flex flex-col gap-1.5 px-4 py-2 text-[11px] text-maroon/60">
-          <div className="flex items-center gap-2">
-            <Sparkles size={12} className="animate-pulse text-gold-deep" />
-            <span className="font-semibold text-maroon-deep">Pengumuman Kaunter:</span>
-            <span className="max-w-md truncate text-maroon/70">
-              Promosi potongan upah 50% untuk rantai leher 916 & trade-in bonus sah sehingga hujung bulan.
-            </span>
-          </div>
+          <AnnouncementTicker text={announcement} className="text-maroon/70" />
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/15 pt-1.5 text-[10px] text-maroon/50">
             <span className="truncate">

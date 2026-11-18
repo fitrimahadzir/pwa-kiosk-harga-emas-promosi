@@ -8,6 +8,8 @@ dan projek ini mematuhi formulasi [SemVer 2.0.0](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- Pengumuman kaunter: pita teks berjalan (marquee) di footer kiosk dengan tab admin khas **Pengumuman** (di bawah Promosi) — admin boleh tambah, susun dan buang banyak teks; semuanya disimpan secara global dalam `kiosk_announcement` (Supabase) untuk semua outlet
+- Migrasi `supabase/migrate-announcement.sql` untuk mencipta jadual pengumuman pada pangkalan data sedia ada
 - Multi-outlet pricing: setiap outlet boleh ada harga, promosi dan setting sendiri
 - Admin panel kini ada pilihan outlet untuk tukar konfigurasi per outlet
 - Tab "Harga" admin: pemilihan outlet/kiosk (Langkah 1) sebelum kemaskini harga — setiap outlet disimpan harga sendiri

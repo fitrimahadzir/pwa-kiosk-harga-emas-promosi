@@ -1,4 +1,5 @@
 import {
+  CounterAnnouncement,
   GoldPriceItem,
   GoldPurity,
   PromoItem,
@@ -61,6 +62,10 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   tagline: 'Ketulenan Terjamin • Nilai Warisan Sepanjang Zaman',
   currency: 'MYR',
 };
+
+/** Teks pengumuman kaunter lalai (dipaparkan jika server belum ada rekod). */
+export const DEFAULT_ANNOUNCEMENT =
+  'Selamat datang ke Gold Reserve. Harga emas dikemaskini setiap hari — sila hubungi kakitangan kaunter untuk sebarang pertanyaan.';
 
 function requireClient() {
   if (!isSupabaseConfigured || !supabase) {
@@ -477,6 +482,62 @@ export async function pushOutletSettings(
 }
 
 // ---------------------------------------------------------------------------
+// Pengumuman kaunter (global — satu teks untuk semua outlet)
+// ---------------------------------------------------------------------------
+
+type AnnouncementRow = {
+  message?: string | null;
+  updated_at?: string | null;
+};
+
+/** Baca pengumuman kaunter global dari server; fallback kepada teks lalai. */
+export async function fetchAnnouncement(): Promise<CounterAnnouncement> {
+  const fallback: CounterAnnouncement = {
+    message: DEFAULT_ANNOUNCEMENT,
+    updatedAt: '',
+  };
+
+  if (!isSupabaseConfigured || !supabase) return fallback;
+
+  const { data, error } = await supabase
+    .from('kiosk_announcement')
+    .select('message, updated_at')
+    .eq('id', 'counter')
+    .maybeSingle();
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca pengumuman kaunter:', error.message);
+    return fallback;
+  }
+
+  const row = (data as AnnouncementRow | null) ?? null;
+  if (!row) return fallback;
+
+  return {
+    message: typeof row.message === 'string' ? row.message : fallback.message,
+    updatedAt: row.updated_at ?? '',
+  };
+}
+
+/** Simpan pengumuman kaunter global (admin sahaja). */
+export async function pushAnnouncement(message: string): Promise<void> {
+  const db = requireClient();
+
+  const { error } = await db
+    .from('kiosk_announcement')
+    .upsert({ id: 'counter', message }, { onConflict: 'id' });
+
+  if (error) {
+    const missingTable = error.code === '42P01' || /relation .*kiosk_announcement/i.test(error.message);
+    throw new Error(
+      missingTable
+        ? 'Jadual pengumuman belum ada di Supabase. Jalankan supabase/migrate-announcement.sql dalam SQL Editor dahulu.'
+        : `Gagal menyimpan pengumuman ke server: ${error.message}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sejarah harga (ditulis oleh trigger server)
 // ---------------------------------------------------------------------------
 
@@ -566,6 +627,14 @@ export function subscribeToOutletChanges(
       { event: '*', schema: 'public', table: 'kiosk_settings' },
       (payload) => {
         if (matchesOutlet(payload)) onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_announcement' },
+      () => {
+        // Pengumuman adalah global — relevan untuk semua outlet.
+        onChange();
       },
     )
     .subscribe();

@@ -81,6 +81,23 @@ create table if not exists public.kiosk_settings (
   updated_at timestamptz not null default now()
 );
 
+-- Pengumuman kaunter GLOBAL — satu teks marquee untuk semua outlet.
+-- `message` boleh menyimpan berbilang pengumuman: satu baris = satu entri.
+create table if not exists public.kiosk_announcement (
+  id text primary key default 'counter' check (id = 'counter'),
+  message text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Benih teks lalai supaya pita pengumuman sudah kelihatan selepas pemasangan.
+insert into public.kiosk_announcement (id, message)
+values (
+  'counter',
+  'Selamat datang ke Gold Reserve. Harga emas dikemaskini setiap hari — sila hubungi kakitangan kaunter untuk sebarang pertanyaan.'
+)
+on conflict (id) do nothing;
+
 -- Admin = pengguna Supabase Auth yang didaftarkan di sini.
 create table if not exists public.kiosk_admins (
   user_id uuid primary key references auth.users (id) on delete cascade,
@@ -89,7 +106,6 @@ create table if not exists public.kiosk_admins (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
 -- Jejak audit sebenar (ditulis oleh trigger, bukan oleh klien).
 create table if not exists public.kiosk_price_history (
   id bigint generated always as identity primary key,
@@ -254,6 +270,11 @@ create trigger kiosk_promos_set_updated_at
 drop trigger if exists kiosk_settings_set_updated_at on public.kiosk_settings;
 create trigger kiosk_settings_set_updated_at
   before update on public.kiosk_settings
+  for each row execute function public.kiosk_set_updated_at();
+
+drop trigger if exists kiosk_announcement_set_updated_at on public.kiosk_announcement;
+create trigger kiosk_announcement_set_updated_at
+  before update on public.kiosk_announcement
   for each row execute function public.kiosk_set_updated_at();
 
 create or replace function public.kiosk_log_price_change()
@@ -480,6 +501,40 @@ revoke all on public.kiosk_settings from anon, authenticated;
 grant select on public.kiosk_settings to anon, authenticated;
 grant insert, update, delete on public.kiosk_settings to authenticated;
 
+-- ---- kiosk_announcement: awam baca; hanya admin tulis ----
+alter table public.kiosk_announcement enable row level security;
+alter table public.kiosk_announcement force row level security;
+
+drop policy if exists "Kiosk announcement readable" on public.kiosk_announcement;
+drop policy if exists "Kiosk admins can insert announcement" on public.kiosk_announcement;
+drop policy if exists "Kiosk admins can update announcement" on public.kiosk_announcement;
+drop policy if exists "Kiosk admins can delete announcement" on public.kiosk_announcement;
+
+create policy "Kiosk announcement readable"
+  on public.kiosk_announcement
+  for select to anon, authenticated
+  using (true);
+
+create policy "Kiosk admins can insert announcement"
+  on public.kiosk_announcement
+  for insert to authenticated
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can update announcement"
+  on public.kiosk_announcement
+  for update to authenticated
+  using (public.is_kiosk_admin())
+  with check (public.is_kiosk_admin());
+
+create policy "Kiosk admins can delete announcement"
+  on public.kiosk_announcement
+  for delete to authenticated
+  using (public.is_kiosk_admin());
+
+revoke all on public.kiosk_announcement from anon, authenticated;
+grant select on public.kiosk_announcement to anon, authenticated;
+grant insert, update, delete on public.kiosk_announcement to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 6b. Supabase Storage — bucket poster promosi
 -- ---------------------------------------------------------------------------
@@ -554,6 +609,15 @@ begin
       and tablename = 'kiosk_settings'
   ) then
     alter publication supabase_realtime add table public.kiosk_settings;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'kiosk_announcement'
+  ) then
+    alter publication supabase_realtime add table public.kiosk_announcement;
   end if;
 exception
   when undefined_object then

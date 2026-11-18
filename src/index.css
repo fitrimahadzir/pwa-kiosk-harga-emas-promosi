@@ -152,6 +152,19 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
 
+  /* Warm beige surface for secondary price cards (999 & 375).
+     Deliberately darker than the near-white .gr-card-light so the board
+     reads as beige instead of stark white. */
+  .gr-card-cream {
+    border-radius: 1rem;
+    border: 1px solid color-mix(in srgb, var(--color-line) 30%, transparent);
+    background: linear-gradient(180deg, #ddcbab 0%, #cbb68f 100%);
+    color: var(--color-maroon-deep);
+    box-shadow:
+      0 16px 36px -30px rgba(59, 7, 7, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  }
+
   .gr-card-gold {
     border-radius: 1rem;
     border: 1px solid color-mix(in srgb, var(--color-gold-deep) 45%, transparent);
@@ -258,6 +271,59 @@
 
 .gr-drawer {
   animation: gr-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Announcement ticker: two identical items inside the track, shifted by 50%
+   for a seamless infinite loop. Duration is set inline per text length. */
+@keyframes gr-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.gr-marquee {
+  display: flex;
+  width: max-content;
+  animation-name: gr-marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.gr-marquee-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.gr-marquee-item {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  white-space: nowrap;
+  padding-right: 0.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gr-marquee {
+    width: 100%;
+    animation: none;
+  }
+
+  .gr-marquee-group {
+    flex-wrap: wrap;
+  }
+
+  .gr-marquee-group[aria-hidden="true"] {
+    display: none;
+  }
+
+  .gr-marquee-item {
+    white-space: normal;
+  }
 }
 
 /* Thermal printer output: print only the quotation slip, white paper & dark text */

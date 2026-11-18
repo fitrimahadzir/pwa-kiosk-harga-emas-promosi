@@ -53,7 +53,7 @@ export const GoldPriceBoard: React.FC<GoldPriceBoardProps> = ({
             <div
               key={purity}
               onClick={() => handleCardClick(purity)}
-              className={`${isMainItem ? 'gr-card-gold' : 'gr-card-light'} border transition-all cursor-pointer flex flex-col justify-between ${
+              className={`${isMainItem ? 'gr-card-gold' : 'gr-card-cream'} border transition-all cursor-pointer flex flex-col justify-between ${
                 isCalculatorOpen ? 'p-2 sm:p-3.5' : 'p-2.5 sm:p-4 lg:p-5'
               } ${
                 isSelected
@@ -71,7 +71,9 @@ export const GoldPriceBoard: React.FC<GoldPriceBoardProps> = ({
                   <span className="font-serif font-black tracking-wide text-maroon-deep text-lg leading-none sm:text-2xl lg:text-3xl">
                     {purity}
                   </span>
-                  <span className="text-[8px] sm:text-[10px] font-mono px-1 sm:px-1.5 py-0.5 rounded bg-maroon-deep text-gold whitespace-nowrap">
+                  <span className={`text-[8px] sm:text-[10px] font-mono px-1 sm:px-1.5 py-0.5 rounded whitespace-nowrap ${
+                    isMainItem ? 'bg-maroon-deep text-gold' : 'bg-gold/90 text-maroon-deep'
+                  }`}>
                     {item.karat}
                   </span>
                 </div>
@@ -80,30 +82,28 @@ export const GoldPriceBoard: React.FC<GoldPriceBoardProps> = ({
               {/* 2. HARGA PER GRAM (JUAL) */}
               <div className={isCalculatorOpen ? 'my-1.5 sm:my-2' : 'my-2 sm:my-3 lg:my-3.5'}>
                 <div className="flex items-baseline gap-1 sm:gap-1.5 flex-wrap">
-                  <span className={`font-black tracking-tight font-sans leading-none ${
-                    isMainItem ? 'text-maroon-deep' : 'text-gold-deep'
-                  } ${
+                  <span className={`font-black tracking-tight font-sans leading-none text-maroon-deep ${
                     isCalculatorOpen ? 'text-sm sm:text-xl lg:text-3xl' : 'text-base sm:text-2xl lg:text-4xl'
                   }`}>
                     {formatBoardPrice(item.sellPrice)}
                   </span>
                   <span className={`text-[9px] sm:text-[10px] lg:text-xs font-medium whitespace-nowrap ${
-                    isMainItem ? 'text-maroon-deep/70' : 'text-maroon/50'
+                    isMainItem ? 'text-maroon-deep/70' : 'text-maroon-deep'
                   }`}>/ gram</span>
                 </div>
               </div>
 
               {/* 3. HARGA BELI */}
               <div className={`border-t pt-1.5 sm:pt-2.5 flex flex-wrap items-baseline justify-between gap-x-1 gap-y-0.5 leading-tight ${
-                isMainItem ? 'border-maroon-deep/25' : 'border-line/15'
+                isMainItem ? 'border-maroon-deep/25' : 'border-line/25'
               }`}>
                 <span className={`text-[9px] sm:text-xs font-medium ${
-                  isMainItem ? 'text-maroon-deep/75' : 'text-maroon/60'
+                  isMainItem ? 'text-maroon-deep/75' : 'text-maroon-deep'
                 }`}>Harga Beli:</span>
                 <span className="font-bold text-maroon-deep font-mono text-[10px] sm:text-sm lg:text-base whitespace-nowrap">
                   {formatBoardPrice(item.buyPrice)}{' '}
                   <span className={`text-[8px] sm:text-[11px] font-normal ${
-                    isMainItem ? 'text-maroon-deep/70' : 'text-maroon/50'
+                    isMainItem ? 'text-maroon-deep/70' : 'text-maroon-deep'
                   }`}>/g</span>
                 </span>
               </div>

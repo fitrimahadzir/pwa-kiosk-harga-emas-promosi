@@ -23,6 +23,9 @@ import {
   ExternalLink,
   CalendarClock,
   Copy,
+  Megaphone,
+  ChevronUp,
+  ChevronDown,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -32,9 +35,16 @@ import {
   PriceHistoryEntry,
 } from '../types/gold';
 import { formatMYR } from '../utils/calculator';
+import {
+  ANNOUNCEMENT_MAX_LENGTH,
+  joinAnnouncementMessages,
+  normalizeAnnouncementMessages,
+  splitAnnouncementMessages,
+} from '../utils/announcement';
 import { DEFAULT_PRICES, deletePromoImage, uploadPromoImage } from '../utils/storage';
 import { isSupabaseConfigured, supabase, supabaseConfig } from '../lib/supabase';
 import { isStandalonePwa } from '../utils/device';
+import { AnnouncementTicker } from './AnnouncementTicker';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -51,13 +61,24 @@ interface AdminModalProps {
   ) => Promise<void>;
   promos: PromoItem[];
   onUpdatePromos: (newPromos: PromoItem[]) => Promise<void>;
+  /** Teks pengumuman kaunter global (semua outlet). */
+  announcement: string;
+  onUpdateAnnouncement: (message: string) => Promise<void>;
   history: PriceHistoryEntry[];
   onResetDefaults: () => Promise<void>;
 }
 
-type AdminTab = 'prices' | 'promos' | 'history' | 'settings';
+type AdminTab = 'prices' | 'promos' | 'announcement' | 'history' | 'settings';
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
+
+type AnnouncementDraftEntry = { id: string; text: string };
+
+let announcementEntrySeq = 0;
+function createAnnouncementEntry(text = ''): AnnouncementDraftEntry {
+  announcementEntrySeq += 1;
+  return { id: `announcement-${announcementEntrySeq}`, text };
+}
 
 const PURITY_ROWS: { id: GoldPurity; label: string; karat: string }[] = [
   { id: '999', label: 'Emas 999', karat: '24K' },
@@ -67,6 +88,16 @@ const PURITY_ROWS: { id: GoldPurity; label: string; karat: string }[] = [
 
 /** Indeks lajur tetap 5 outlet seperti dalam templat reka bentuk. */
 const OUTLET_SLOTS = [1, 2, 3, 4, 5] as const;
+
+/**
+ * Outlet HQ dikenal pasti daripada nama, bukan kedudukan A–Z daripada server.
+ * Contohnya "HQ Warehouse" dan "HQ" sepadan, manakala "Amanjaya Mall" tidak.
+ */
+const HQ_OUTLET_PATTERN = /\bhq\b/i;
+
+function isHqOutlet(name: string): boolean {
+  return HQ_OUTLET_PATTERN.test(name);
+}
 
 type PriceMatrix = Record<string, Record<GoldPurity, GoldPriceItem>>;
 type HqBase = Record<GoldPurity, { sellPrice: number; buyPrice: number }>;
@@ -89,6 +120,7 @@ function formatKemaskiniTerakhir(iso: string | null): string {
 const NAV_ITEMS: { id: AdminTab; label: string; icon: LucideIcon }[] = [
   { id: 'prices', label: 'Harga', icon: Coins },
   { id: 'promos', label: 'Promosi', icon: ImageIcon },
+  { id: 'announcement', label: 'Pengumuman', icon: Megaphone },
   { id: 'history', label: 'Sejarah', icon: History },
   { id: 'settings', label: 'Tetapan', icon: SettingsIcon },
 ];
@@ -105,6 +137,12 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
     title: 'Poster Promosi',
     description:
       'Muat naik gambar poster sahaja — ia dipaparkan secara bergilir di skrin tablet kaunter.',
+  },
+  announcement: {
+    kicker: 'Paparan Kaunter',
+    title: 'Pengumuman Kaunter',
+    description:
+      'Tambah satu atau lebih teks pengumuman — semuanya berjalan sebagai pita marquee di footer kiosk semua outlet.',
   },
   history: {
     kicker: 'Audit',
@@ -236,6 +274,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onUpdateAllPrices,
   promos,
   onUpdatePromos,
+  announcement,
+  onUpdateAnnouncement,
   history,
   onResetDefaults,
 }) => {
@@ -265,21 +305,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [priceSaving, setPriceSaving] = useState<boolean>(false);
   const [copyNotice, setCopyNotice] = useState<string>('');
 
-  // Sehingga 5 outlet sebenar dipetakan ke lajur 1-5. Lajur tanpa outlet
+  // Sehingga 5 outlet sebenar dipetakan ke lajur 1-5. HQ sentiasa diletakkan
+  // di lajur pertama walaupun senarai server tersusun A–Z. Lajur tanpa outlet
   // berdaftar dipaparkan sebagai tempat letak kosong (tidak boleh disimpan).
   const matrixOutlets = useMemo(() => {
     const names = [...availableOutlets];
     if (names.length === 0 && currentOutletName) names.push(currentOutletName);
-    return Array.from(new Set(names)).slice(0, OUTLET_SLOTS.length);
+
+    const unique = Array.from(new Set(names));
+    return [
+      ...unique.filter(isHqOutlet),
+      ...unique.filter((name) => !isHqOutlet(name)),
+    ].slice(0, OUTLET_SLOTS.length);
   }, [availableOutlets, currentOutletName]);
+
+  const hqOutletName =
+    matrixOutlets.find(isHqOutlet) ?? matrixOutlets[0] ?? null;
 
   const outletSlots = useMemo(
     () =>
-      OUTLET_SLOTS.map((slotNumber, index) => ({
-        slotNumber,
-        outletName: matrixOutlets[index] ?? null,
-        isHq: index === 0,
-      })),
+      OUTLET_SLOTS.map((slotNumber, index) => {
+        const outletName = matrixOutlets[index] ?? null;
+        return {
+          slotNumber,
+          outletName,
+          isHq: Boolean(outletName && isHqOutlet(outletName)),
+        };
+      }),
     [matrixOutlets],
   );
 
@@ -320,7 +372,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       seeded[name] = outlet;
     }
 
-    const hqSource = matrixOutlets[0] ? seeded[matrixOutlets[0]] : DEFAULT_PRICES;
+    const hqSource = hqOutletName ? seeded[hqOutletName] : DEFAULT_PRICES;
     setMatrix(seeded);
     setHqBase({
       '999': {
@@ -357,6 +409,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [promoError, setPromoError] = useState<string>('');
   const [promoSuccess, setPromoSuccess] = useState<string>('');
 
+  // Pengumuman kaunter (marquee) — senarai teks global di Supabase.
+  const [announcementDraft, setAnnouncementDraft] = useState<AnnouncementDraftEntry[]>(
+    () => {
+      const messages = splitAnnouncementMessages(announcement);
+      return messages.length
+        ? messages.map((message) => createAnnouncementEntry(message))
+        : [createAnnouncementEntry()];
+    },
+  );
+  const [announcementSaving, setAnnouncementSaving] = useState<boolean>(false);
+  const [announcementError, setAnnouncementError] = useState<string>('');
+  const [announcementSuccess, setAnnouncementSuccess] = useState<string>('');
+
+  useEffect(() => {
+    const messages = splitAnnouncementMessages(announcement);
+    setAnnouncementDraft(
+      messages.length
+        ? messages.map((message) => createAnnouncementEntry(message))
+        : [createAnnouncementEntry()],
+    );
+  }, [announcement]);
+
+  useEffect(() => {
+    setAnnouncementError('');
+    setAnnouncementSuccess('');
+  }, [currentOutletName]);
+
   // Supabase connection test in the settings tab.
   const [supabaseTestState, setSupabaseTestState] = useState<
     'idle' | 'testing' | 'success' | 'error'
@@ -381,6 +460,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const activePromoCount = draftPromos.filter((promo) => promo.isActive).length;
   const page = PAGE_COPY[activeTab];
+
+  const announcementPayload = joinAnnouncementMessages(
+    announcementDraft.map((entry) => entry.text),
+  );
+  const announcementActiveCount = normalizeAnnouncementMessages(
+    announcementDraft.map((entry) => entry.text),
+  ).length;
 
   const lastUpdatedLabel = useMemo(() => {
     const stamps: string[] = [];
@@ -745,6 +831,74 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  const addAnnouncementEntry = () => {
+    setAnnouncementDraft((previous) => [...previous, createAnnouncementEntry()]);
+    setAnnouncementSuccess('');
+    setAnnouncementError('');
+  };
+
+  const removeAnnouncementEntry = (id: string) => {
+    setAnnouncementDraft((previous) => {
+      const next = previous.filter((entry) => entry.id !== id);
+      return next.length ? next : [createAnnouncementEntry()];
+    });
+    setAnnouncementSuccess('');
+    setAnnouncementError('');
+  };
+
+  const moveAnnouncementEntry = (id: string, direction: -1 | 1) => {
+    setAnnouncementDraft((previous) => {
+      const index = previous.findIndex((entry) => entry.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= previous.length) return previous;
+      const next = [...previous];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+    setAnnouncementSuccess('');
+  };
+
+  const updateAnnouncementEntry = (id: string, text: string) => {
+    setAnnouncementDraft((previous) =>
+      previous.map((entry) => (entry.id === id ? { ...entry, text } : entry)),
+    );
+    setAnnouncementSuccess('');
+  };
+
+  const handleSaveAnnouncement = async () => {
+    if (announcementSaving) return;
+
+    const cleaned = normalizeAnnouncementMessages(
+      announcementDraft.map((entry) => entry.text),
+    );
+
+    setAnnouncementSaving(true);
+    setAnnouncementError('');
+    setAnnouncementSuccess('');
+    try {
+      await onUpdateAnnouncement(cleaned.join('\n'));
+      setAnnouncementDraft(
+        cleaned.length
+          ? cleaned.map((message) => createAnnouncementEntry(message))
+          : [createAnnouncementEntry()],
+      );
+      setAnnouncementSuccess(
+        cleaned.length
+          ? `${cleaned.length} teks pengumuman disimpan & disiarkan ke semua kiosk outlet.`
+          : 'Semua teks dikosongkan — pita tersembunyi di kiosk.',
+      );
+      window.setTimeout(() => setAnnouncementSuccess(''), 4500);
+    } catch (error) {
+      setAnnouncementError(
+        error instanceof Error
+          ? error.message
+          : 'Gagal menyimpan pengumuman ke server.',
+      );
+    } finally {
+      setAnnouncementSaving(false);
+    }
+  };
+
   const handleResetDefaults = async () => {
     if (
       !window.confirm(
@@ -892,9 +1046,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 Poster baharu
               </button>
             )}
+            {activeTab === 'announcement' && (
+              <button
+                type="button"
+                onClick={addAnnouncementEntry}
+                disabled={announcementSaving}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus className="size-4" />
+                Tambah teks
+              </button>
+            )}
           </div>
 
-          {activeTab !== 'prices' && (
+          {activeTab !== 'prices' && activeTab !== 'announcement' && (
             <div className="mt-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
               <StatCard
                 icon={LayoutDashboard}
@@ -929,7 +1094,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {activeTab === 'prices' && (
             <>
               {/* Bahagian 1: penyelarasan pantas harga asas HQ */}
-              <section className="gr-card-light mt-6 overflow-hidden">
+              {/* <section className="gr-card-light mt-6 overflow-hidden">
                 <div className="flex flex-col gap-3 border-b border-line/15 p-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <p className="gr-kicker text-maroon">Penyelarasan Pantas</p>
@@ -937,8 +1102,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       Harga Asas HQ
                     </p>
                     <p className="mt-1 text-sm text-maroon-deep/55">
-                      Tetapkan harga rujukan HQ (RM / gram), kemudian salin ke semua
-                      outlet dalam satu klik.
+                      Tetapkan harga rujukan {hqOutletName ?? 'HQ'} (RM / gram),
+                      kemudian salin ke semua outlet dalam satu klik.
                     </p>
                   </div>
                   <button
@@ -1005,7 +1170,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </p>
                   )}
                 </div>
-              </section>
+              </section> */}
 
               {/* Bahagian 2: matriks harga semua outlet */}
               <section className="gr-card-light mt-4 overflow-hidden">
@@ -1438,6 +1603,181 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 )}
               </div>
             </section>
+          )}
+
+          {activeTab === 'announcement' && (
+            <div className="mt-6 grid gap-4">
+              <section className="gr-card-light overflow-hidden">
+                <div className="border-b border-line/15 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-gold-deep/25 bg-gold/10 text-gold-deep">
+                        <Megaphone className="size-5" />
+                      </span>
+                      <div>
+                        <p className="gr-kicker text-maroon">Paparan Kaunter</p>
+                        <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                          Senarai Pengumuman
+                        </p>
+                        <p className="mt-1 text-sm text-maroon-deep/55">
+                          Setiap teks dipaparkan bergilir sebagai teks berjalan di
+                          footer kiosk semua outlet. Tambah seberapa banyak yang perlu.
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
+                        announcementActiveCount > 0
+                          ? 'border-[#4f9d6e]/30 bg-[#eef8f1] text-[#3f835b]'
+                          : 'border-line/25 bg-[#fbf6ef] text-maroon-deep/55'
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          announcementActiveCount > 0
+                            ? 'bg-[#4f9d6e]'
+                            : 'bg-maroon-deep/30'
+                        }`}
+                      />
+                      {announcementActiveCount > 0
+                        ? `${announcementActiveCount} teks aktif`
+                        : 'Tidak aktif'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-5">
+                  {announcementDraft.map((entry, index) => (
+                    <div
+                      key={entry.id}
+                      className="rounded-xl border border-line/15 bg-[#fbf6ef] p-3.5"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-maroon-deep/55">
+                          <span className="grid size-5 place-items-center rounded-md bg-maroon-deep/10 text-[10px] tabular-nums text-maroon-deep">
+                            {index + 1}
+                          </span>
+                          Teks {index + 1}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveAnnouncementEntry(entry.id, -1)}
+                            disabled={index === 0}
+                            aria-label={`Naikkan teks ${index + 1}`}
+                            className="grid size-7 place-items-center rounded-md text-maroon-deep/50 transition-colors hover:bg-white hover:text-maroon-deep disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <ChevronUp className="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveAnnouncementEntry(entry.id, 1)}
+                            disabled={index === announcementDraft.length - 1}
+                            aria-label={`Turunkan teks ${index + 1}`}
+                            className="grid size-7 place-items-center rounded-md text-maroon-deep/50 transition-colors hover:bg-white hover:text-maroon-deep disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <ChevronDown className="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAnnouncementEntry(entry.id)}
+                            aria-label={`Buang teks ${index + 1}`}
+                            className="grid size-7 place-items-center rounded-md text-[#a34a26] transition-colors hover:bg-[#fbeee9]"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <textarea
+                        rows={2}
+                        maxLength={ANNOUNCEMENT_MAX_LENGTH}
+                        value={entry.text}
+                        onChange={(event) =>
+                          updateAnnouncementEntry(entry.id, event.target.value)
+                        }
+                        placeholder="cth: Promosi upah tukang 50% untuk pembelian 10g ke atas. Sah sehingga 30 November."
+                        className="min-h-[64px] w-full resize-y rounded-lg border border-line/25 bg-[#fffdf9] px-3.5 py-2.5 text-sm leading-relaxed text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep/45 focus:outline-none focus:ring-2 focus:ring-gold/15"
+                      />
+                      <p className="mt-1.5 text-right text-[10px] tabular-nums text-maroon-deep/40">
+                        {entry.text.length}/{ANNOUNCEMENT_MAX_LENGTH}
+                      </p>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={addAnnouncementEntry}
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gold-deep/35 bg-gold/[0.06] text-xs font-semibold text-maroon transition-colors hover:border-gold-deep/55 hover:bg-gold/10"
+                  >
+                    <Plus className="size-4" />
+                    Tambah teks pengumuman
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-line/15 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[11px] leading-relaxed text-maroon-deep/50">
+                    {announcementActiveCount} teks · disimpan ke Supabase (global) dan
+                    disegerakkan ke semua tablet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveAnnouncement()}
+                    disabled={
+                      announcementSaving ||
+                      !isSupabaseConfigured ||
+                      announcementPayload === announcement
+                    }
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {announcementSaving ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Save className="size-4" />
+                    )}
+                    {announcementSaving ? 'Menyimpan...' : 'Simpan pengumuman'}
+                  </button>
+                </div>
+
+                {(announcementSuccess || announcementError) && (
+                  <div
+                    className={`mx-5 mb-5 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs ${
+                      announcementSuccess
+                        ? 'border-[#4f9d6e]/25 bg-[#eef8f1] font-semibold text-[#3f835b]'
+                        : 'border-rose-300/50 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    {announcementSuccess ? (
+                      <Check className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <X className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <span>{announcementSuccess || announcementError}</span>
+                  </div>
+                )}
+              </section>
+
+              <section className="gr-card-light overflow-hidden">
+                <div className="border-b border-line/15 px-5 py-3">
+                  <p className="gr-kicker text-maroon">Pratonton</p>
+                </div>
+                <div className="p-5">
+                  <div className="rounded-xl border border-line/15 bg-[#fbf6ef] px-3 py-2 text-[11px] text-maroon/70">
+                    {announcementActiveCount > 0 ? (
+                      <AnnouncementTicker text={announcementPayload} />
+                    ) : (
+                      <p className="text-maroon-deep/40">
+                        Tiada teks aktif — pita tersembunyi di kiosk.
+                      </p>
+                    )}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-maroon-deep/45">
+                    Pita sebenar akan kelihatan begini di footer kiosk. Susunan ikut
+                    nombor teks di atas.
+                  </p>
+                </div>
+              </section>
+            </div>
           )}
 
           {activeTab === 'history' && (

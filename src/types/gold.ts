@@ -38,6 +38,12 @@ export interface ShopSettings {
   currency: string;
 }
 
+export interface CounterAnnouncement {
+  /** Teks pengumuman kaunter (marquee). Kosong = pita tersembunyi. */
+  message: string;
+  updatedAt: string;
+}
+
 export interface OutletConfig {
   outletName: string;
   prices: Record<GoldPurity, GoldPriceItem>;
