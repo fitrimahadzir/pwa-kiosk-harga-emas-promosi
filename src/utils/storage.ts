@@ -302,29 +302,52 @@ type PromoRow = {
   id?: string;
   image_url?: string | null;
   is_active?: boolean | null;
+  title?: string | null;
+  description?: string | null;
+  package_price?: number | string | null;
 };
 
 /** Baca semua poster promosi global dari server (sama untuk semua outlet). */
 export async function fetchPromos(): Promise<PromoItem[]> {
   if (!isSupabaseConfigured || !supabase) return [];
 
-  const { data, error } = await supabase
+  const mapRows = (rows: PromoRow[]): PromoItem[] =>
+    rows.map((row, index) => ({
+      id: String(row.id ?? `promo-${index}`),
+      imageUrl: row.image_url ?? '',
+      isActive: row.is_active !== false,
+      title: row.title ?? '',
+      description: row.description ?? '',
+      packagePrice: Math.max(0, Number(row.package_price) || 0),
+    }));
+
+  const result = await supabase
     .from('kiosk_promos')
-    .select('id, image_url, is_active')
+    .select('id, image_url, is_active, title, description, package_price')
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
 
-  if (error) {
-    console.warn('[emaspos] Gagal membaca poster promosi:', error.message);
+  // Kesiapan untuk pangkalan data yang belum menjalankan
+  // supabase/migrate-promo-details.sql — masih boleh baca poster lama.
+  if (result.error && /42703|does not exist|column/i.test(result.error.message)) {
+    const legacy = await supabase
+      .from('kiosk_promos')
+      .select('id, image_url, is_active')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    if (legacy.error) {
+      console.warn('[emaspos] Gagal membaca poster promosi:', legacy.error.message);
+      return [];
+    }
+    return Array.isArray(legacy.data) ? mapRows(legacy.data as PromoRow[]) : [];
+  }
+
+  if (result.error) {
+    console.warn('[emaspos] Gagal membaca poster promosi:', result.error.message);
     return [];
   }
-  if (!Array.isArray(data)) return [];
-
-  return (data as PromoRow[]).map((row, index) => ({
-    id: String(row.id ?? `promo-${index}`),
-    imageUrl: row.image_url ?? '',
-    isActive: row.is_active !== false,
-  }));
+  return Array.isArray(result.data) ? mapRows(result.data as PromoRow[]) : [];
 }
 
 /** Ganti senarai poster global di server (admin sahaja). */
@@ -335,6 +358,9 @@ export async function pushPromos(promos: PromoItem[]): Promise<void> {
     id: promo.id,
     image_url: promo.imageUrl,
     is_active: promo.isActive,
+    title: promo.title ?? '',
+    description: promo.description ?? '',
+    package_price: Math.max(0, Number(promo.packagePrice) || 0),
     sort_order: index,
   }));
 
@@ -346,10 +372,15 @@ export async function pushPromos(promos: PromoItem[]): Promise<void> {
       const legacySchema =
         error.code === '42P10' ||
         /no unique or exclusion constraint/i.test(error.message);
+      const missingDetailsColumn =
+        error.code === '42703' ||
+        /column .+(title|description|package_price)|does not exist/i.test(error.message);
       throw new Error(
         legacySchema
           ? 'Jadual kiosk_promos masih guna struktur lama. Sila jalankan supabase/migrate-global-promos.sql (atau schema.sql terkini) dalam Supabase SQL Editor.'
-          : `Gagal menyimpan poster ke server: ${error.message}`,
+          : missingDetailsColumn
+            ? 'Kolum butiran pakej belum wujud. Sila jalankan supabase/migrate-promo-details.sql dalam Supabase SQL Editor.'
+            : `Gagal menyimpan poster ke server: ${error.message}`,
       );
     }
   }

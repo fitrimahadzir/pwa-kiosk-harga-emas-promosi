@@ -15,6 +15,12 @@ export interface PromoItem {
   id: string;
   imageUrl: string;
   isActive: boolean;
+  /** Tajuk pakej yang dipaparkan pada halaman detail poster. */
+  title: string;
+  /** Penerangan ringkas pakej. */
+  description: string;
+  /** Harga pakej dalam RM. 0 bermaksud tiada harga ditetapkan. */
+  packagePrice: number;
 }
 
 export interface PriceHistoryEntry {
@@ -63,6 +69,10 @@ export interface CalculatorInput {
   tradeInPurity: GoldPurity;
   tradeInWeight: number;
   tradeInRate: number;
+  /** Harga tetap pakej promosi. Jika > 0, menggantikan kos emas + upah. */
+  packagePrice?: number;
+  /** Nama pakej promosi untuk resit sebut harga. */
+  packageTitle?: string;
 }
 
 export interface QuotationResult {
@@ -82,4 +92,7 @@ export interface QuotationResult {
   tradeInPurity: GoldPurity;
   tradeInAmount: number;
   finalTotal: number;
+  /** Harga tetap pakej promosi (jika sebut harga dijana dari poster). */
+  packagePrice?: number;
+  packageTitle?: string;
 }

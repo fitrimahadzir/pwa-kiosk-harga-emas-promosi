@@ -68,6 +68,13 @@ create table if not exists public.kiosk_promos (
   updated_at timestamptz not null default now()
 );
 
+-- Butiran pakej bagi setiap poster (dipaparkan pada halaman detail promosi).
+-- `add column if not exists` juga menaik taraf jadual sedia ada.
+alter table public.kiosk_promos
+  add column if not exists title text not null default '',
+  add column if not exists description text not null default '',
+  add column if not exists package_price numeric(12, 2) not null default 0;
+
 -- Tetapan paparan / resit bagi setiap outlet.
 create table if not exists public.kiosk_settings (
   outlet_name text primary key,

@@ -24,6 +24,7 @@ import {
   CalendarClock,
   Copy,
   Megaphone,
+  Pencil,
   ChevronUp,
   ChevronDown,
   type LucideIcon,
@@ -402,7 +403,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [newPromo, setNewPromo] = useState<Partial<PromoItem>>({
     imageUrl: '',
     isActive: true,
+    title: '',
+    description: '',
+    packagePrice: 0,
   });
+  // Input harga disimpan sebagai teks supaya pengguna boleh menaip "1." dan
+  // nilai perpuluhan dengan selesa sebelum ditukar kepada nombor masa simpan.
+  const [promoPriceInput, setPromoPriceInput] = useState<string>('');
+  // Gambar yang sudah dimuat naik tetapi belum disimpan ke rekod poster.
+  const [promoStagedImageUrl, setPromoStagedImageUrl] = useState<string | null>(null);
+  // Gambar asal semasa mengedit — dipadam hanya selepas gambar ganti disimpan.
+  const [promoOriginalImageUrl, setPromoOriginalImageUrl] = useState<string | null>(null);
+  const [promoEditingId, setPromoEditingId] = useState<string | null>(null);
   const [promoUploading, setPromoUploading] = useState<boolean>(false);
   const [promoUploadError, setPromoUploadError] = useState<string>('');
   const [promoSaving, setPromoSaving] = useState<boolean>(false);
@@ -683,15 +695,37 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  const resetPromoForm = () => {
+    setNewPromo({
+      imageUrl: '',
+      isActive: true,
+      title: '',
+      description: '',
+      packagePrice: 0,
+    });
+    setPromoPriceInput('');
+    setPromoStagedImageUrl(null);
+    setPromoOriginalImageUrl(null);
+    setPromoEditingId(null);
+    setPromoUploadError('');
+  };
+
   /**
-   * Simpan satu poster ke server. Dipanggil terus selepas gambar dimuat naik
-   * supaya tiada langkah "simpan" berasingan yang mudah terlepas pandang.
+   * Simpan satu poster (gambar + butiran pakej) ke server.
+   * Dipanggil oleh butang "Simpan Poster" selepas admin mengisi butiran.
    */
-  const persistPromo = async (id: string, imageUrl: string) => {
+  const persistPromo = async (
+    id: string,
+    imageUrl: string,
+    details: { title: string; description: string; packagePrice: number; isActive: boolean },
+  ) => {
     const created: PromoItem = {
       id,
       imageUrl,
-      isActive: true,
+      isActive: details.isActive,
+      title: details.title.trim(),
+      description: details.description.trim(),
+      packagePrice: Math.max(0, Number(details.packagePrice) || 0),
     };
 
     const existingIndex = draftPromos.findIndex((promo) => promo.id === id);
@@ -704,10 +738,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     await onUpdatePromos(updated);
     setDraftPromos(updated);
     setShowAddPromo(false);
-    setNewPromo({ imageUrl: '', isActive: true });
-    setPromoUploadError('');
+    const wasEditing = existingIndex !== -1;
+    const replacedImageUrl =
+      promoOriginalImageUrl && promoOriginalImageUrl !== imageUrl
+        ? promoOriginalImageUrl
+        : null;
+    resetPromoForm();
+    if (replacedImageUrl) {
+      void deletePromoImage(replacedImageUrl).catch(() => {
+        // Fail storan yatim tidak menghalang kemas kini rekod.
+      });
+    }
     setPromoError('');
-    setPromoSuccess('Poster global berjaya disimpan dan akan muncul di semua outlet.');
+    setPromoSuccess(
+      wasEditing
+        ? 'Butiran poster berjaya dikemas kini.'
+        : 'Poster global berjaya disimpan dan akan muncul di semua outlet.',
+    );
     setTimeout(() => setPromoSuccess(''), 5000);
   };
 
@@ -750,11 +797,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     if (!newPromo.imageUrl || promoSaving || promoUploading) return;
 
     const id = newPromo.id ?? `promo-${Date.now()}`;
+    const imageUrl = newPromo.imageUrl;
 
     setPromoSaving(true);
     setPromoError('');
+    setPromoSuccess('');
     try {
-      await persistPromo(id, newPromo.imageUrl);
+      await persistPromo(id, imageUrl, {
+        title: newPromo.title ?? '',
+        description: newPromo.description ?? '',
+        packagePrice: Number(promoPriceInput) || 0,
+        isActive: newPromo.isActive !== false,
+      });
     } catch (error) {
       setPromoError(
         error instanceof Error ? error.message : 'Gagal menyimpan poster ke server.',
@@ -762,6 +816,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     } finally {
       setPromoSaving(false);
     }
+  };
+
+  const handleEditPromo = (promo: PromoItem) => {
+    setNewPromo({
+      id: promo.id,
+      imageUrl: promo.imageUrl,
+      isActive: promo.isActive,
+      title: promo.title ?? '',
+      description: promo.description ?? '',
+      packagePrice: promo.packagePrice ?? 0,
+    });
+    setPromoPriceInput(
+      promo.packagePrice && promo.packagePrice > 0 ? String(promo.packagePrice) : '',
+    );
+    setPromoEditingId(promo.id);
+    setPromoStagedImageUrl(null);
+    setPromoOriginalImageUrl(promo.imageUrl);
+    setPromoUploadError('');
+    setPromoError('');
+    setPromoSuccess('');
+    setShowAddPromo(true);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -780,9 +855,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       const imageUrl = await uploadPromoImage(blob);
       const id = newPromo.id ?? `promo-${Date.now()}`;
 
-      // Simpan terus ke Supabase — bukan sekadar pratonton setempat.
-      setNewPromo({ id, imageUrl, isActive: true });
-      await persistPromo(id, imageUrl);
+      // Gambar disimpan ke Storage sekarang, tetapi rekod poster hanya
+      // disimpan selepas admin mengisi tajuk / penerangan / harga pakej.
+      if (promoStagedImageUrl && promoStagedImageUrl !== imageUrl) {
+        void deletePromoImage(promoStagedImageUrl).catch(() => {});
+      }
+      setNewPromo((prev) => ({ ...prev, id, imageUrl, isActive: prev.isActive ?? true }));
+      setPromoStagedImageUrl(imageUrl);
     } catch (error) {
       setPromoUploadError(
         error instanceof Error
@@ -1038,7 +1117,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {activeTab === 'promos' && (
               <button
                 type="button"
-                onClick={() => setShowAddPromo((open) => !open)}
+                onClick={() => {
+                  if (showAddPromo) {
+                    if (promoStagedImageUrl) {
+                      void deletePromoImage(promoStagedImageUrl).catch(() => {});
+                    }
+                    setShowAddPromo(false);
+                    resetPromoForm();
+                    return;
+                  }
+                  resetPromoForm();
+                  setPromoError('');
+                  setShowAddPromo(true);
+                }}
                 disabled={promoUploading || promoSaving}
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-sm font-semibold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1400,21 +1491,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <div className="flex items-center justify-between gap-3">
                       <p className="flex items-center gap-2 font-heading text-lg text-maroon-deep">
                         <Sparkles className="size-4 text-gold-deep" />
-                        Poster baharu
+                        {promoEditingId ? 'Kemas kini poster' : 'Poster baharu'}
                       </p>
                       <button
                         type="button"
                         onClick={() => {
-                          const unsavedUrl = newPromo.imageUrl;
-                          setShowAddPromo(false);
-                          setNewPromo({ imageUrl: '', isActive: true });
-                          setPromoUploadError('');
-                          setPromoError('');
-                          if (unsavedUrl) {
-                            void deletePromoImage(unsavedUrl).catch(() => {
+                          if (promoStagedImageUrl) {
+                            void deletePromoImage(promoStagedImageUrl).catch(() => {
                               // Fail storan yatim tidak menghalang pembatalan.
                             });
                           }
+                          setShowAddPromo(false);
+                          resetPromoForm();
+                          setPromoError('');
                         }}
                         className="text-xs font-semibold text-maroon/70 hover:text-maroon-deep"
                       >
@@ -1423,8 +1512,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
 
                     <p className="rounded-lg bg-white/60 px-3 py-2 text-[11px] leading-relaxed text-maroon-deep/60">
-                      Pilih gambar sahaja — ia akan terus dimuat naik dan disimpan ke server,
-                      kemudian dipaparkan pada semua outlet.
+                      Muat naik gambar kemudian isi tajuk, penerangan dan harga pakej. Butiran ini
+                      dipaparkan pada halaman poster dan digunakan oleh butang Beli Pantas.
                     </p>
 
                     <div>
@@ -1452,7 +1541,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                setNewPromo({ imageUrl: '', isActive: true });
+                                if (promoStagedImageUrl) {
+                                  void deletePromoImage(promoStagedImageUrl).catch(() => {});
+                                }
+                                setNewPromo((prev) => ({ ...prev, imageUrl: '' }));
+                                setPromoStagedImageUrl(null);
                                 setPromoUploadError('');
                               }}
                               className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#a34a26] hover:bg-[#fbeee9]"
@@ -1501,21 +1594,78 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       )}
                     </div>
 
-                    {newPromo.imageUrl && (
-                      <div className="flex flex-wrap items-center justify-end gap-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2">
+                    <div className="space-y-3 rounded-xl border border-line/15 bg-white/70 p-3">
+                      <p className="font-heading text-base text-maroon-deep">Butiran pakej</p>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold text-maroon/70">
+                          Tajuk pakej
+                        </span>
+                        <input
+                          type="text"
+                          value={newPromo.title ?? ''}
+                          onChange={(e) =>
+                            setNewPromo((prev) => ({ ...prev, title: e.target.value }))
+                          }
+                          placeholder="Contoh: Rantai Tangan Emas 916"
+                          className="h-10 w-full rounded-lg border border-line/25 bg-[#fffdf9] px-3 text-xs text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep focus:outline-none"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold text-maroon/70">
+                          Penerangan
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={newPromo.description ?? ''}
+                          onChange={(e) =>
+                            setNewPromo((prev) => ({ ...prev, description: e.target.value }))
+                          }
+                          placeholder="Ciri-ciri pakej, promosi, atau maklumat untuk pelanggan..."
+                          className="w-full resize-y rounded-lg border border-line/25 bg-[#fffdf9] px-3 py-2 text-xs leading-relaxed text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep focus:outline-none"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold text-maroon/70">
+                          Harga pakej (RM)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={promoPriceInput}
+                          onChange={(e) => setPromoPriceInput(e.target.value)}
+                          placeholder="0.00"
+                          className="h-10 w-full rounded-lg border border-line/25 bg-[#fffdf9] px-3 text-xs text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep focus:outline-none"
+                        />
+                        <span className="mt-1 block text-[10px] leading-relaxed text-maroon-deep/50">
+                          Harga ini dipratetap dalam kalkulator bila butang Beli Pantas ditekan.
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-3">
+                      {promoStagedImageUrl && (
                         <p className="mr-auto text-[11px] text-amber-800">
                           Gambar sudah dimuat naik tetapi belum tersimpan ke pangkalan data.
                         </p>
-                        <button
-                          type="submit"
-                          disabled={!newPromo.imageUrl || promoUploading || promoSaving}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg bg-gold px-3 text-xs font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {promoSaving && <Loader2 className="size-4 animate-spin" />}
-                          {promoSaving ? 'Menyimpan...' : 'Cuba simpan semula'}
-                        </button>
-                      </div>
-                    )}
+                      )}
+                      <button
+                        type="submit"
+                        disabled={!newPromo.imageUrl || promoUploading || promoSaving}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-gold px-3 text-xs font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {promoSaving && <Loader2 className="size-4 animate-spin" />}
+                        {promoSaving
+                          ? 'Menyimpan...'
+                          : promoEditingId
+                            ? 'Simpan Perubahan'
+                            : 'Simpan Poster'}
+                      </button>
+                    </div>
                   </form>
                 )}
 
@@ -1548,14 +1698,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         />
                         <div className="min-w-0">
                           <p className="truncate font-heading text-lg leading-none text-maroon-deep">
-                            Poster {index + 1}
+                            {promo.title?.trim() || `Poster ${index + 1}`}
                           </p>
-                          <p className="mt-1 text-[11px] text-maroon-deep/50">
-                            Dikongsi oleh semua outlet
+                          <p className="mt-1 truncate text-[11px] text-maroon-deep/50">
+                            {promo.packagePrice > 0
+                              ? `${formatMYR(promo.packagePrice)} · dikongsi oleh semua outlet`
+                              : 'Dikongsi oleh semua outlet'}
                           </p>
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditPromo(promo)}
+                          disabled={promoSaving}
+                          className="grid size-8 place-items-center rounded-lg text-maroon/60 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Edit poster ${index + 1}`}
+                          title="Edit butiran poster"
+                        >
+                          <Pencil className="size-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleTogglePromo(promo.id)}

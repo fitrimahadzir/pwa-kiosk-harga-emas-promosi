@@ -111,33 +111,55 @@ export const QuotationModal: React.FC<QuotationModalProps> = ({
             <div className="flex justify-between items-start gap-2">
               <div>
                 <span className="font-bold text-black block text-xs">
-                  Barang Kemas Emas {quote.purity}
+                  {quote.packageTitle || `Barang Kemas Emas ${quote.purity}`}
                 </span>
                 <span className="text-[10px] text-neutral-600 uppercase">
-                  Ketulenan {quote.karat}
+                  {quote.packagePrice ? 'Pakej Promosi' : `Ketulenan ${quote.karat}`}
                 </span>
               </div>
               <div className="text-right">
-                <span className="font-bold text-black text-xs block">
-                  {formatWeight(quote.weight)}
-                </span>
-                <span className="text-[10px] text-neutral-600">
-                  @{formatMYR(quote.pricePerGram)}/g
-                </span>
+                {quote.packagePrice ? (
+                  <>
+                    <span className="font-bold text-black text-xs block">
+                      Harga Tetap
+                    </span>
+                    <span className="text-[10px] text-neutral-600">
+                      {formatMYR(quote.packagePrice)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-black text-xs block">
+                      {formatWeight(quote.weight)}
+                    </span>
+                    <span className="text-[10px] text-neutral-600">
+                      @{formatMYR(quote.pricePerGram)}/g
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
             {/* Financial breakdown */}
             <div className="space-y-1 pt-1.5 text-[11px] text-neutral-700">
-              <div className="flex justify-between gap-2">
-                <span>Nilai Berat Emas:</span>
-                <span className="font-bold text-black">{formatMYR(quote.goldCost)}</span>
-              </div>
+              {quote.packagePrice ? (
+                <div className="flex justify-between gap-2">
+                  <span>Harga Pakej:</span>
+                  <span className="font-bold text-black">{formatMYR(quote.packagePrice)}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between gap-2">
+                    <span>Nilai Berat Emas:</span>
+                    <span className="font-bold text-black">{formatMYR(quote.goldCost)}</span>
+                  </div>
 
-              <div className="flex justify-between gap-2">
-                <span>Upah Tukang:</span>
-                <span className="font-bold text-black">{formatMYR(quote.workmanship)}</span>
-              </div>
+                  <div className="flex justify-between gap-2">
+                    <span>Upah Tukang:</span>
+                    <span className="font-bold text-black">{formatMYR(quote.workmanship)}</span>
+                  </div>
+                </>
+              )}
 
               {quote.discountAmount > 0 && (
                 <div className="flex justify-between gap-2 font-semibold text-black">

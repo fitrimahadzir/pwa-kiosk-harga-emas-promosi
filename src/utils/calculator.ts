@@ -52,10 +52,17 @@ export function computeQuotation(
   };
   const pricePerGram = purityItem.sellPrice || 0;
   const weight = Math.max(0, Number(input.weight) || 0);
-  const workmanship = Math.max(0, Number(input.workmanship) || 0);
+  const packagePrice = Math.max(0, Number(input.packagePrice) || 0);
 
-  const goldCost = Math.round(weight * pricePerGram * 100) / 100;
-  const subtotal = Math.round((goldCost + workmanship) * 100) / 100;
+  // Pakej promosi ada harga tetap — kos emas/upah tidak dikira semula.
+  const goldCost =
+    packagePrice > 0 ? 0 : Math.round(weight * pricePerGram * 100) / 100;
+  const workmanship =
+    packagePrice > 0 ? 0 : Math.max(0, Number(input.workmanship) || 0);
+  const subtotal =
+    packagePrice > 0
+      ? packagePrice
+      : Math.round((goldCost + workmanship) * 100) / 100;
 
   // Calculate discount
   let discountAmount = 0;
@@ -96,5 +103,7 @@ export function computeQuotation(
     tradeInRate,
     tradeInAmount,
     finalTotal,
+    packagePrice: packagePrice > 0 ? packagePrice : undefined,
+    packageTitle: input.packageTitle,
   };
 }

@@ -33,6 +33,7 @@ import { Header } from './components/Header';
 import { GoldPriceBoard } from './components/GoldPriceBoard';
 import { AnnouncementTicker } from './components/AnnouncementTicker';
 import { PromoCarousel } from './components/PromoCarousel';
+import { PromoDetailPage } from './components/PromoDetailPage';
 import { QuotationModal } from './components/QuotationModal';
 import { AdminModal } from './components/AdminModal';
 import { CalculatorPage } from './components/CalculatorPage';
@@ -47,12 +48,30 @@ const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-type Page = 'home' | 'calculator';
+type Page = 'home' | 'calculator' | 'promo';
 
-function parseHash(): { admin: boolean; page: Page } {
-  const raw = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-  if (raw === 'admin') return { admin: true, page: 'home' };
-  return { admin: false, page: raw === 'kalkulator' ? 'calculator' : 'home' };
+type Route = {
+  admin: boolean;
+  page: Page;
+  /** ID poster untuk halaman detail (#/promo/<id>). */
+  promoId: string | null;
+};
+
+function parseHash(): Route {
+  const raw = window.location.hash.replace(/^#\/?/, '');
+  const [segment, ...rest] = raw.split('/');
+  const key = segment.toLowerCase();
+
+  if (key === 'admin') return { admin: true, page: 'home', promoId: null };
+  if (key === 'kalkulator') return { admin: false, page: 'calculator', promoId: null };
+  if (key === 'promo' && rest.length > 0) {
+    return {
+      admin: false,
+      page: 'promo',
+      promoId: decodeURIComponent(rest.join('/')),
+    };
+  }
+  return { admin: false, page: 'home', promoId: null };
 }
 
 /** Carry the previous sell price forward so the trend arrow stays meaningful. */
@@ -98,9 +117,12 @@ export default function App() {
   // Active calculator purity selection
   const [selectedPurity, setSelectedPurity] = useState<GoldPurity>('916');
 
-  // Hash routing: kiosk/calculator <-> admin panel (`#/admin`).
-  const [route, setRoute] = useState<{ admin: boolean; page: Page }>(parseHash());
+  // Hash routing: kiosk / calculator / promo detail <-> admin panel (`#/admin`).
+  const [route, setRoute] = useState<Route>(parseHash());
   const [page, setPage] = useState<Page>(route.page);
+
+  // Harga pakej dari poster yang dibuka dengan "Beli Pantas".
+  const [promoPreset, setPromoPreset] = useState<{ title: string; price: number } | null>(null);
 
   // Modals
   const [activeQuotation, setActiveQuotation] = useState<QuotationResult | null>(null);
@@ -113,6 +135,11 @@ export default function App() {
 
   const isOnline = useOnlineStatus();
 
+  const activePromo =
+    page === 'promo' && route.promoId
+      ? promos.find((promo) => promo.id === route.promoId && promo.isActive) ?? null
+      : null;
+
   // Stage kiosk: dalam paparan melintang, tinggi poster promosi diselaraskan
   // dengan tinggi papan harga + banner 3:1 + kalkulator.
   const stageLeftRef = useRef<HTMLDivElement | null>(null);
@@ -124,11 +151,35 @@ export default function App() {
     isLandscape && !route.admin && page === 'home' && Boolean(currentOutletName),
   );
 
-  const navigateTo = (nextPage: Page) => {
-    window.location.hash = nextPage === 'calculator' ? '/kalkulator' : '/';
+  const navigateTo = (nextPage: Page, promoId?: string | null) => {
+    const nextPromoId = nextPage === 'promo' ? promoId ?? null : null;
+    window.location.hash =
+      nextPage === 'calculator'
+        ? '/kalkulator'
+        : nextPromoId
+          ? `/promo/${encodeURIComponent(nextPromoId)}`
+          : '/';
     setPage(nextPage);
-    setRoute((prev) => ({ ...prev, page: nextPage }));
+    setRoute({ admin: false, page: nextPage, promoId: nextPromoId });
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openCalculator = () => {
+    setPromoPreset(null);
+    navigateTo('calculator');
+  };
+
+  const openPromoDetail = (promo: PromoItem) => {
+    setPromoPreset(null);
+    navigateTo('promo', promo.id);
+  };
+
+  const buyFromPromo = (promo: PromoItem) => {
+    setPromoPreset({
+      title: promo.title?.trim() || 'Pakej Promosi',
+      price: promo.packagePrice,
+    });
+    navigateTo('calculator');
   };
 
   // Keep state in sync with the browser hash (#/admin, #/kalkulator).
@@ -175,7 +226,7 @@ export default function App() {
     if (parseHash().admin) return;
 
     window.location.hash = '/admin';
-    setRoute({ admin: true, page: 'home' });
+    setRoute({ admin: true, page: 'home', promoId: null });
     setPage('home');
   }, [authChecked, adminSession, route.admin]);
 
@@ -189,7 +240,7 @@ export default function App() {
       setLoginError('');
       if (parseHash().admin) {
         window.location.hash = '/';
-        setRoute({ admin: false, page: 'home' });
+        setRoute({ admin: false, page: 'home', promoId: null });
         setPage('home');
       }
     });
@@ -306,7 +357,7 @@ export default function App() {
     setLoginError('');
     setActiveQuotation(null);
     setPage('home');
-    setRoute({ admin: false, page: 'home' });
+    setRoute({ admin: false, page: 'home', promoId: null });
     window.location.hash = '/';
   }, []);
 
@@ -326,14 +377,14 @@ export default function App() {
     setActiveQuotation(null);
     setLoginError('');
     setPage('home');
-    setRoute({ admin: false, page: 'home' });
+    setRoute({ admin: false, page: 'home', promoId: null });
     window.location.hash = '/';
   };
 
   const openAdmin = () => {
     setLoginError('');
     setIsLoggingIn(false);
-    setRoute({ admin: true, page: 'home' });
+    setRoute({ admin: true, page: 'home', promoId: null });
     window.location.hash = '/admin';
   };
 
@@ -363,7 +414,7 @@ export default function App() {
         setCurrentOutletName(fallback);
       }
 
-      setRoute({ admin: true, page: 'home' });
+      setRoute({ admin: true, page: 'home', promoId: null });
       window.location.hash = '/admin';
     } catch (error) {
       setAdminSession(null);
@@ -383,7 +434,7 @@ export default function App() {
     }
     setAdminSession(null);
     setLoginError('');
-    setRoute({ admin: false, page: 'home' });
+    setRoute({ admin: false, page: 'home', promoId: null });
     setPage('home');
     window.location.hash = '/';
   };
@@ -391,7 +442,7 @@ export default function App() {
   const backToKiosk = () => {
     setLoginError('');
     setIsLoggingIn(false);
-    setRoute({ admin: false, page: 'home' });
+    setRoute({ admin: false, page: 'home', promoId: null });
     window.location.hash = '/';
   };
 
@@ -598,7 +649,9 @@ export default function App() {
         onLogout={handleExitOutlet}
         onOpenAdmin={openAdmin}
         showCalculator={page === 'calculator'}
-        onToggleCalculator={() => navigateTo(page === 'calculator' ? 'home' : 'calculator')}
+        onToggleCalculator={() =>
+          page === 'calculator' ? navigateTo('home') : openCalculator()
+        }
       />
 
       {/* 2. MAIN CONTENT */}
@@ -611,6 +664,18 @@ export default function App() {
             onPurityChange={setSelectedPurity}
             onGenerateQuote={(quote) => setActiveQuotation(quote)}
             onBack={() => navigateTo('home')}
+            preset={promoPreset}
+          />
+        </main>
+      ) : page === 'promo' && activePromo ? (
+        /* Dedicated poster detail page */
+        <main className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          <PromoDetailPage
+            promo={activePromo}
+            shopName={settings.shopName}
+            shopPhone={settings.phone}
+            onBack={() => navigateTo('home')}
+            onBuy={buyFromPromo}
           />
         </main>
       ) : (
@@ -631,7 +696,7 @@ export default function App() {
                 prices={prices}
                 selectedPurity={selectedPurity}
                 onSelectPurity={setSelectedPurity}
-                onOpenCalculator={() => navigateTo('calculator')}
+                onOpenCalculator={openCalculator}
               />
             </div>
 
@@ -651,7 +716,7 @@ export default function App() {
             {/* Compact launcher to the dedicated calculator page */}
             <button
               type="button"
-              onClick={() => navigateTo('calculator')}
+              onClick={openCalculator}
               className="order-4 w-full flex items-center justify-between gap-4 rounded-2xl bg-gold px-4 py-3.5 text-left text-maroon-deep border border-gold-deep/45 shadow-[0_16px_36px_-26px_rgba(212,161,58,0.75)] transition hover:bg-gold-soft active:scale-[0.99]"
             >
               <span className="flex items-center gap-3">
@@ -684,11 +749,7 @@ export default function App() {
           >
             {/* Promo Posters Carousel (3:4 — height synced in landscape) */}
             <div className="w-full flex-1 flex items-center justify-center landscape:h-full landscape:justify-center">
-              <PromoCarousel
-                promos={promos}
-                shopName={settings.shopName}
-                shopPhone={settings.phone}
-              />
+              <PromoCarousel promos={promos} onOpenDetail={openPromoDetail} />
             </div>
           </div>
         </main>

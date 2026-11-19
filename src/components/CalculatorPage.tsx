@@ -10,6 +10,8 @@ interface CalculatorPageProps {
   onPurityChange: (purity: GoldPurity) => void;
   onGenerateQuote: (quote: QuotationResult) => void;
   onBack: () => void;
+  /** Pakej promosi dari halaman poster (harga tetap dipratetap). */
+  preset?: { title: string; price: number } | null;
 }
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
@@ -20,6 +22,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
   onPurityChange,
   onGenerateQuote,
   onBack,
+  preset,
 }) => {
   return (
     <section className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -64,6 +67,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
             selectedPurity={selectedPurity}
             onPurityChange={onPurityChange}
             onGenerateQuote={onGenerateQuote}
+            preset={preset}
           />
         </div>
 

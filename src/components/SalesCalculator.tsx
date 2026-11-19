@@ -20,6 +20,8 @@ interface SalesCalculatorProps {
   onPurityChange: (purity: GoldPurity) => void;
   onGenerateQuote: (quote: QuotationResult) => void;
   onClose?: () => void;
+  /** Pakej promosi dari halaman poster — harga tetap dipratetap. */
+  preset?: { title: string; price: number } | null;
 }
 
 export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
@@ -28,6 +30,7 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
   onPurityChange,
   onGenerateQuote,
   onClose,
+  preset,
 }) => {
   // Local state for calculations
   const [weight, setWeight] = useState<string>('5.00');
@@ -43,6 +46,7 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
 
   const currentRate = prices[selectedPurity]?.sellPrice || 0;
   const currentTradeInRate = prices[tradeInPurity]?.buyPrice || 0;
+  const isPackage = Boolean(preset && preset.price > 0);
 
   // Build input object
   const calcInput: CalculatorInput = {
@@ -55,6 +59,8 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
     tradeInPurity,
     tradeInWeight: hasTradeIn ? parseFloat(tradeInWeight) || 0 : 0,
     tradeInRate: currentTradeInRate,
+    packagePrice: isPackage ? preset?.price : 0,
+    packageTitle: isPackage ? preset?.title : undefined,
   };
 
   const quotation = computeQuotation(calcInput, prices);
@@ -89,7 +95,9 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
               Kalkulator Jualan Pantas
             </h2>
             <p className="text-[10px] text-maroon/55">
-              Kiraan serta-merta termasuk kos emas, upah & trade-in
+              {isPackage
+                ? 'Harga pakej tetap — boleh tambah diskaun & trade-in'
+                : 'Kiraan serta-merta termasuk kos emas, upah & trade-in'}
             </p>
           </div>
         </div>
@@ -121,7 +129,22 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
 
       {/* Main inputs section */}
       <div className="py-1.5 space-y-1.5">
-        
+        {isPackage && (
+          <div className="rounded-xl border border-gold-deep/40 bg-gold/15 px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gold-deep">
+              Pakej Promosi
+            </p>
+            <p className="text-xs font-semibold text-maroon-deep">
+              {preset?.title || 'Pakej promosi'}
+            </p>
+            <p className="mt-0.5 text-sm font-black text-gold-deep">
+              {formatMYR(preset?.price ?? 0)}
+            </p>
+          </div>
+        )}
+
+        {!isPackage && (
+          <>
         {/* 1. Gred Emas Tabs */}
         <div>
           <label className="text-[10px] sm:text-[11px] font-semibold text-maroon/65 block mb-1">
@@ -238,6 +261,8 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
           </div>
 
         </div>
+          </>
+        )}
 
         {/* 3. Trade-In & Discount Option Toggles */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -369,14 +394,23 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
         
         {/* Subtotal line items */}
         <div className="space-y-0.5 text-[10px] sm:text-[11px] text-maroon/65 pb-1.5 mb-1.5 border-b border-gold-deep/20">
-          <div className="flex justify-between">
-            <span>Kos Emas ({formatWeight(quotation.weight)} × {formatMYR(quotation.pricePerGram)}):</span>
-            <span className="font-mono text-maroon-deep">{formatMYR(quotation.goldCost)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Upah Tukang:</span>
-            <span className="font-mono text-maroon-deep">{formatMYR(quotation.workmanship)}</span>
-          </div>
+          {isPackage ? (
+            <div className="flex justify-between">
+              <span>Harga Pakej {preset?.title ? `(${preset.title})` : ''}:</span>
+              <span className="font-mono text-maroon-deep">{formatMYR(quotation.subtotal)}</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between">
+                <span>Kos Emas ({formatWeight(quotation.weight)} × {formatMYR(quotation.pricePerGram)}):</span>
+                <span className="font-mono text-maroon-deep">{formatMYR(quotation.goldCost)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Upah Tukang:</span>
+                <span className="font-mono text-maroon-deep">{formatMYR(quotation.workmanship)}</span>
+              </div>
+            </>
+          )}
           {quotation.discountAmount > 0 && (
             <div className="flex justify-between text-emerald-700 font-medium">
               <span>Diskaun ({discountType === 'percent' ? `${discount}%` : 'Tunai'}):</span>

@@ -20,7 +20,7 @@ interface AnnouncementTickerProps {
  */
 export const AnnouncementTicker: React.FC<AnnouncementTickerProps> = ({
   text,
-  label = 'Pengumuman Kaunter',
+  label = 'Pengumuman',
   className = '',
 }) => {
   const messages = splitAnnouncementMessages(text);

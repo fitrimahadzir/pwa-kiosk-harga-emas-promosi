@@ -1,36 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Maximize2, 
-  X
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
 } from 'lucide-react';
 import { PromoItem } from '../types/gold';
 
 interface PromoCarouselProps {
   promos: PromoItem[];
-  shopPhone?: string;
-  shopName?: string;
+  /** Buka halaman detail poster (2 lajur: poster + penerangan pakej). */
+  onOpenDetail: (promo: PromoItem) => void;
 }
 
 export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   promos,
-  shopPhone,
-  shopName
+  onOpenDetail,
 }) => {
   const activePromos = promos.filter((p) => p.isActive);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [zoomedPromo, setZoomedPromo] = useState<PromoItem | null>(null);
   const [isPaused, setIsPaused] = useState(false);
 
   // Auto-play timer
   useEffect(() => {
-    if (activePromos.length <= 1 || isPaused || zoomedPromo) return;
+    if (activePromos.length <= 1 || isPaused) return;
     const interval = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % activePromos.length);
     }, 6000);
     return () => clearInterval(interval);
-  }, [activePromos.length, isPaused, zoomedPromo]);
+  }, [activePromos.length, isPaused]);
 
   // Reset index if out of bounds
   useEffect(() => {
@@ -53,16 +50,6 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
     setCurrentIndex((prev) => (prev - 1 + activePromos.length) % activePromos.length);
   };
 
-  const handleSharePromo = () => {
-    const lines = ['Promosi terkini di kedai emas kami'];
-    if (shopName) lines.push(`Di ${shopName}`);
-    if (shopPhone) lines.push(`Hubungi ${shopPhone}`);
-    const text = lines.join('\n');
-    if (navigator.clipboard) {
-      void navigator.clipboard.writeText(text);
-    }
-  };
-
   if (activePromos.length === 0) {
     return (
       <div className="gr-card-light p-6 h-full w-full flex flex-col items-center justify-center text-center">
@@ -80,168 +67,115 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   }
 
   return (
-    <>
-      <div 
-        className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/4] portrait:sm:aspect-[3/1] mx-auto landscape:mx-0 landscape:h-full landscape:w-full landscape:max-w-none landscape:aspect-auto group"
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => setIsPaused(false)}
+    <div
+      className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/4] portrait:sm:aspect-[3/1] mx-auto landscape:mx-0 landscape:h-full landscape:w-full landscape:max-w-none landscape:aspect-auto group"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+    >
+      {/* Main Banner Image Container (Nisbah 3:4) */}
+      <div
+        onClick={() => current && onOpenDetail(current)}
+        className="relative w-full h-full overflow-hidden cursor-pointer aspect-[3/4]"
+        title="Tekan untuk lihat poster penuh & maklumat pakej"
       >
-        {/* Main Banner Image Container (Nisbah 3:4) */}
-        <div 
-          onClick={() => setZoomedPromo(current)}
-          className="relative w-full h-full overflow-hidden cursor-pointer aspect-[3/1]"
-          title="Tekan untuk paparan poster penuh & maklumat lanjut (Nisbah 3:4)"
-        >
-          {/* Mobile portrait: single 3:4 poster */}
-          <img
-            src={current.imageUrl}
-            alt="Poster promosi"
-            className="w-full h-full object-cover aspect-[3/1] transition-transform duration-700 ease-out group-hover:scale-105 portrait:sm:hidden"
-            loading="lazy"
-          />
+        {/* Mobile portrait: single 3:4 poster */}
+        <img
+          src={current.imageUrl}
+          alt="Poster promosi"
+          className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105 portrait:sm:hidden"
+          loading="lazy"
+        />
 
-          {/* Tablet portrait: two side-by-side 3:4 containers (3:2 combined),
-              both showing the same poster image. */}
-          <div className="hidden portrait:sm:flex w-full h-full">
-            {[0, 1].map((slot) => (
-              <div
-                key={slot}
-                className={`relative w-1/2 h-full overflow-hidden ${
-                  slot === 0 ? 'border-r border-[#d4a13a]/25' : ''
-                }`}
-              >
-                <img
-                  src={current.imageUrl}
-                  alt={slot === 0 ? 'Poster promosi' : ''}
-                  className="w-full h-full object-cover aspect-[3/1] transition-transform duration-700 ease-out group-hover:scale-105"
-                  loading="lazy"
-                />
-              </div>
-            ))}
-          </div>
+        {/* Tablet portrait: two side-by-side 3:4 containers (3:2 combined),
+            both showing the same poster image. */}
+        <div className="hidden portrait:sm:flex w-full h-full">
+          {[0, 1].map((slot) => (
+            <div
+              key={slot}
+              className={`relative w-1/2 h-full overflow-hidden ${
+                slot === 0 ? 'border-r border-[#d4a13a]/25' : ''
+              }`}
+            >
+              <img
+                src={current.imageUrl}
+                alt={slot === 0 ? 'Poster promosi' : ''}
+                className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                loading="lazy"
+              />
+            </div>
+          ))}
+        </div>
 
-          {/* Top Floating Controls: Page Indicator & Zoom */}
-          <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
-            <span className="px-2 py-0.5 rounded-lg bg-black/70 text-[#ece2d0] text-[10px] font-mono backdrop-blur-sm border border-white/20">
-              {currentIndex + 1} / {activePromos.length}
-            </span>
+        {/* Top Floating Controls: Page Indicator & Detail */}
+        <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
+          <span className="px-2 py-0.5 rounded-lg bg-black/70 text-[#ece2d0] text-[10px] font-mono backdrop-blur-sm border border-white/20">
+            {currentIndex + 1} / {activePromos.length}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (current) onOpenDetail(current);
+            }}
+            className="p-1.5 rounded-xl bg-[#2a0404]/80 text-[#ece2d0] hover:text-[#d4a13a] border border-[#d4a13a]/40 backdrop-blur-md transition shadow-md"
+            title="Lihat Detail Poster"
+            aria-label="Lihat detail poster"
+          >
+            <Maximize2 size={13} />
+          </button>
+        </div>
+
+        {/* Left / Right Nav Arrows */}
+        {activePromos.length > 1 && (
+          <>
             <button
+              type="button"
+              onClick={handlePrev}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#2a0404]/80 text-[#ece2d0] hover:bg-[#3b0707] hover:text-[#d4a13a] border border-[#d4a13a]/40 flex items-center justify-center backdrop-blur-md transition shadow-lg opacity-85 group-hover:opacity-100 z-10"
+              aria-label="Previous Promo"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={handleNext}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#2a0404]/80 text-[#ece2d0] hover:bg-[#3b0707] hover:text-[#d4a13a] border border-[#d4a13a]/40 flex items-center justify-center backdrop-blur-md transition shadow-lg opacity-85 group-hover:opacity-100 z-10"
+              aria-label="Next Promo"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Bottom Controls Bar (gradient only as tall as this row) */}
+      <div
+        onClick={() => current && onOpenDetail(current)}
+        className="absolute bottom-0 inset-x-0 z-10 bg-gradient-to-t from-[#2a0404] via-[#2a0404]/85 to-transparent px-3.5 pt-6 pb-2.5 flex items-center justify-between cursor-pointer"
+      >
+        <div className="flex items-center gap-1.5">
+          {activePromos.length > 1 && activePromos.map((p, idx) => (
+            <button
+              key={p.id}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setZoomedPromo(current);
+                setCurrentIndex(idx);
               }}
-              className="p-1.5 rounded-xl bg-[#2a0404]/80 text-[#ece2d0] hover:text-[#d4a13a] border border-[#d4a13a]/40 backdrop-blur-md transition shadow-md"
-              title="Buka Skrin Penuh"
-              aria-label="Zoom promo"
-            >
-              <Maximize2 size={13} />
-            </button>
-          </div>
-
-          {/* Left / Right Nav Arrows */}
-          {activePromos.length > 1 && (
-            <>
-              <button
-                type="button"
-                onClick={handlePrev}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#2a0404]/80 text-[#ece2d0] hover:bg-[#3b0707] hover:text-[#d4a13a] border border-[#d4a13a]/40 flex items-center justify-center backdrop-blur-md transition shadow-lg opacity-85 group-hover:opacity-100 z-10"
-                aria-label="Previous Promo"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={handleNext}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#2a0404]/80 text-[#ece2d0] hover:bg-[#3b0707] hover:text-[#d4a13a] border border-[#d4a13a]/40 flex items-center justify-center backdrop-blur-md transition shadow-lg opacity-85 group-hover:opacity-100 z-10"
-                aria-label="Next Promo"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </>
-          )}
+              className={`h-1.5 rounded-full transition-all ${
+                idx === currentIndex
+                  ? 'w-6 bg-[#d4a13a]'
+                  : 'w-2 bg-[#d4a13a]/30 hover:bg-[#d4a13a]/60'
+              }`}
+              aria-label={`Go to slide ${idx + 1}`}
+            />
+          ))}
         </div>
 
-        {/* Bottom Controls Bar (gradient only as tall as this row) */}
-        <div
-          onClick={() => setZoomedPromo(current)}
-          className="absolute bottom-0 inset-x-0 z-10 bg-gradient-to-t from-[#2a0404] via-[#2a0404]/85 to-transparent px-3.5 pt-6 pb-2.5 flex items-center justify-between cursor-pointer"
-        >
-          <div className="flex items-center gap-1.5">
-            {activePromos.length > 1 && activePromos.map((p, idx) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCurrentIndex(idx);
-                }}
-                className={`h-1.5 rounded-full transition-all ${
-                  idx === currentIndex
-                    ? 'w-6 bg-[#d4a13a]'
-                    : 'w-2 bg-[#d4a13a]/30 hover:bg-[#d4a13a]/60'
-                }`}
-                aria-label={`Go to slide ${idx + 1}`}
-              />
-            ))}
-          </div>
-
-          <span className="text-[10px] text-[#d8be8a] ml-auto">
-            Sentuh untuk besarkan
-          </span>
-        </div>
+        <span className="text-[10px] text-[#d8be8a] ml-auto">
+          Sentuh untuk lihat detail
+        </span>
       </div>
-
-      {/* Fullscreen Lightbox Modal */}
-      {zoomedPromo && (
-        <div 
-          onClick={() => setZoomedPromo(null)}
-          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="relative bg-[#3b0707] border border-[#d4a13a]/60 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col max-h-[94vh]"
-          >
-            {/* Close Button */}
-            <button
-              onClick={() => setZoomedPromo(null)}
-              className="absolute top-4 right-4 z-10 p-2.5 bg-[#2a0404]/80 text-[#ece2d0] hover:text-[#d4a13a] rounded-full border border-[#d4a13a]/40 backdrop-blur-md transition shadow-lg"
-              aria-label="Close Preview"
-            >
-              <X size={20} />
-            </button>
-
-            {/* Lightbox Image with 3:4 ratio */}
-            <div className="w-full bg-black/60 flex items-center justify-center p-4 overflow-hidden">
-              <img
-                src={zoomedPromo.imageUrl}
-                alt="Poster promosi"
-                className="max-h-[72vh] w-auto aspect-[3/1] object-contain rounded-2xl border border-[#d4a13a]/40 shadow-2xl"
-              />
-            </div>
-
-            {/* Action buttons */}
-            <div className="p-5 sm:p-6 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handleSharePromo}
-                className="px-4 py-2.5 rounded-xl bg-[#2a0404] border border-[#d4a13a]/40 text-[#ece2d0] text-xs font-semibold hover:border-[#d4a13a] transition"
-              >
-                Salin Maklumat Kedai
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setZoomedPromo(null)}
-                className="px-6 py-2.5 rounded-xl bg-[#d4a13a] text-[#3b0707] font-bold text-xs shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)] hover:bg-[#d8be8a] transition"
-              >
-                Kembali ke Kaunter
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 };
