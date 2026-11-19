@@ -700,27 +700,19 @@ export default function App() {
           <AnnouncementTicker text={announcement} className="text-maroon/70" />
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line/15 pt-1.5 text-[10px] text-maroon/50">
-            <span className="truncate">
-              {settings.branch} • {settings.phone}
-            </span>
-            <span className="flex items-center gap-1.5">
-              Kadar Disahkan Kaunter
-              <span>•</span>
-              © {new Date().getFullYear()}
-              <span>•</span>
+            <span>© 2026 GoldReserve Jewelry</span>
+            <span
+              className={`flex items-center gap-1 font-semibold ${
+                isOnline ? 'text-success' : 'text-warm'
+              }`}
+              title={isOnline ? 'Sistem bersambung ke rangkaian' : 'Mod Luar Talian (Data disimpan dalam cache)'}
+            >
               <span
-                className={`flex items-center gap-1 font-semibold ${
-                  isOnline ? 'text-success' : 'text-warm'
+                className={`size-1.5 rounded-full ${
+                  isOnline ? 'bg-success animate-pulse' : 'bg-warm'
                 }`}
-                title={isOnline ? 'Sistem bersambung ke rangkaian' : 'Mod Luar Talian (Data disimpan dalam cache)'}
-              >
-                <span
-                  className={`size-1.5 rounded-full ${
-                    isOnline ? 'bg-success animate-pulse' : 'bg-warm'
-                  }`}
-                />
-                {isOnline ? 'Dalam Talian' : 'Luar Talian'}
-              </span>
+              />
+              {isOnline ? 'Dalam Talian' : 'Luar Talian'}
             </span>
           </div>
         </footer>

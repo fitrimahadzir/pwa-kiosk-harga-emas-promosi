@@ -82,7 +82,7 @@ export const PromoCarousel: React.FC<PromoCarouselProps> = ({
   return (
     <>
       <div 
-        className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/1] portrait:sm:aspect-[3/1] mx-auto landscape:mx-0 landscape:h-full landscape:w-full landscape:max-w-none landscape:aspect-auto group"
+        className="relative bg-[#fffdf9] border border-line/15 rounded-2xl overflow-hidden shadow-xl flex flex-col w-full max-w-[430px] portrait:max-w-none aspect-[3/4] portrait:sm:aspect-[3/1] mx-auto landscape:mx-0 landscape:h-full landscape:w-full landscape:max-w-none landscape:aspect-auto group"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >

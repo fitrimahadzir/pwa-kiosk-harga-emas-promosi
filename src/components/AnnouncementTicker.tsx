@@ -27,20 +27,32 @@ export const AnnouncementTicker: React.FC<AnnouncementTickerProps> = ({
   if (messages.length === 0) return null;
 
   const totalChars = messages.reduce((sum, message) => sum + message.length, 0);
-  // ~0.3s per aksara, dihadkan supaya teks pendek/panjang tetap selesa dibaca.
-  const durationSeconds = Math.min(120, Math.max(20, Math.round(totalChars * 0.3)));
+
+  // Ulang senarai mesej supaya setiap separuh trek cukup lebar untuk gelung
+  // yang lancar walaupun teks pengumuman pendek.
+  let groupMessages = messages;
+  let groupChars = totalChars;
+  while (groupChars < 220 && groupMessages.length < 60) {
+    groupMessages = [...groupMessages, ...messages];
+    groupChars += totalChars;
+  }
+
+  // ~0.28s per aksara (berdasarkan lebar separuh trek) untuk kelajuan bacaan konsisten.
+  const durationSeconds = Math.min(160, Math.max(18, Math.round(groupChars * 0.28)));
 
   const renderGroup = (duplicate: boolean) => (
     <span className="gr-marquee-group" aria-hidden={duplicate || undefined}>
-      {messages.map((message, index) => (
+      {groupMessages.map((message, index) => (
         <span
           key={`${duplicate ? 'dup' : 'src'}-${index}`}
           className="gr-marquee-item"
         >
           {message}
-          <span className="mx-5 text-gold-deep/45 sm:mx-8" aria-hidden="true">
-            •
-          </span>
+          <Sparkles
+            size={10}
+            className="mx-5 shrink-0 animate-pulse text-gold-deep/60 sm:mx-8"
+            aria-hidden="true"
+          />
         </span>
       ))}
     </span>

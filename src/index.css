@@ -273,14 +273,14 @@
   animation: gr-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Announcement ticker: two identical items inside the track, shifted by 50%
+/* Announcement ticker: two identical groups inside the track, shifted by 50%
    for a seamless infinite loop. Duration is set inline per text length. */
 @keyframes gr-marquee {
-  from {
-    transform: translateX(0);
+  0% {
+    transform: translate3d(0, 0, 0);
   }
-  to {
-    transform: translateX(-50%);
+  100% {
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
@@ -291,6 +291,7 @@
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   will-change: transform;
+  backface-visibility: hidden;
 }
 
 .gr-marquee-group {
