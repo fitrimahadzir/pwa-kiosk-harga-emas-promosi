@@ -161,7 +161,9 @@ export default function App() {
           : '/';
     setPage(nextPage);
     setRoute({ admin: false, page: nextPage, promoId: nextPromoId });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Kiosk: terus ke atas tanpa animasi supaya tiada susun atur "separuh siap"
+    // kelihatan sebaik balik dari halaman detail.
+    window.scrollTo({ top: 0 });
   };
 
   const openCalculator = () => {
@@ -657,7 +659,7 @@ export default function App() {
       {/* 2. MAIN CONTENT */}
       {page === 'calculator' ? (
         /* Dedicated calculator page */
-        <main className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+        <main key="calculator-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           <CalculatorPage
             prices={prices}
             selectedPurity={selectedPurity}
@@ -669,7 +671,7 @@ export default function App() {
         </main>
       ) : page === 'promo' && activePromo ? (
         /* Dedicated poster detail page */
-        <main className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+        <main key="promo-detail-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           <PromoDetailPage
             promo={activePromo}
             shopName={settings.shopName}
@@ -680,7 +682,7 @@ export default function App() {
         </main>
       ) : (
         /* Main price board page */
-        <main className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 content-center items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-center landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
+        <main key="home-page" className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 content-center items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-center landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
           {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
               In portrait these become direct grid items so the poster can sit
               between them, while landscape keeps the original side-by-side layout.

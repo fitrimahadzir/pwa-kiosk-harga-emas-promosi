@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 
 /**
@@ -46,28 +46,40 @@ function clearStageStyles(el: HTMLDivElement | null): void {
  * pula bergantung pada lebar poster (nisbah 3:4). Hubungan ini diselesaikan
  * secara lelaran: setiap pusingan mengemas kini lebar poster sehingga tinggi
  * kedua-dua lajur bertemu pada nilai yang sama.
+ *
+ * Nota penting: nod DOM disimpan pada masa effect dijalankan (bukan masa
+ * cleanup). Bila halaman bertukar, ref boleh sudah menjadi null — jika kita
+ * bergantung pada `rightRef.current` masa cleanup, saiz lama tertinggal dan
+ * susun atur jadi tidak kemas selepas balik dari halaman lain.
  */
 export function usePromoStageHeight(
   leftRef: RefObject<HTMLDivElement | null>,
   rightRef: RefObject<HTMLDivElement | null>,
   enabled: boolean,
 ): void {
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const rightEl = rightRef.current;
+
     if (!enabled) {
-      clearStageStyles(rightRef.current);
+      clearStageStyles(rightEl);
       return;
     }
+    if (!rightEl) return;
 
     let frame = 0;
     let disposed = false;
+    const timers: number[] = [];
 
     const isLandscape = () => window.matchMedia('(orientation: landscape)').matches;
+
+    // Bersihkan nilai lama SEBELUM sebarang ukuran dibuat. Tanpa ini, lebar/
+    // tinggi dari lawatan sebelumnya mempengaruhi pengiraan susun atur baru.
+    clearStageStyles(rightEl);
 
     const fit = () => {
       if (disposed) return;
 
       const leftEl = leftRef.current;
-      const rightEl = rightRef.current;
       if (!leftEl || !rightEl) return;
       if (!isLandscape()) return;
 
@@ -101,22 +113,28 @@ export function usePromoStageHeight(
       frame = requestAnimationFrame(fit);
     };
 
-    schedule();
     const observer = new ResizeObserver(schedule);
     if (leftRef.current) observer.observe(leftRef.current);
     window.addEventListener('resize', schedule);
     window.addEventListener('orientationchange', schedule);
-    // Susun atur mungkin belum siap sepenuhnya selepas render pertama.
-    const retry = window.setTimeout(schedule, 120);
+
+    // Laksana serta-merta (useLayoutEffect) supaya tiada satu pun frame
+    // dipaparkan dengan saiz lama, kemudian semak semula selepas susun atur
+    // stabil — termasuk bila balik dari halaman detail promosi.
+    fit();
+    schedule();
+    timers.push(window.setTimeout(schedule, 60));
+    timers.push(window.setTimeout(schedule, 180));
+    timers.push(window.setTimeout(schedule, 400));
 
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
-      window.clearTimeout(retry);
+      timers.forEach((timer) => window.clearTimeout(timer));
       observer.disconnect();
       window.removeEventListener('resize', schedule);
       window.removeEventListener('orientationchange', schedule);
-      clearStageStyles(rightRef.current);
+      clearStageStyles(rightEl);
     };
   }, [enabled, leftRef, rightRef]);
 }
