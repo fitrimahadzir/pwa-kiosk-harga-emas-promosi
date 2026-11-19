@@ -83,16 +83,38 @@ export function usePromoStageHeight(
       if (!leftEl || !rightEl) return;
       if (!isLandscape()) return;
 
+      // LANGKAH PENTING — beri lebar awal kepada lajur poster SEBELUM mengukur
+      // lajur kiri. Tanpa itu, kelas `w-full` pada lajur poster mengambil semua
+      // ruang flex, lajur kiri jadi 0 lebar, dan pengiraan di bawah tidak pernah
+      // boleh bermula semula (inilah punca susun atur "pelik" selepas balik dari
+      // halaman detail — saiz lama dibuang, tapi tiada saiz baru yang dikira).
+      if (!rightEl.style.width) {
+        const mainEl = rightEl.closest('main');
+        let available = 0;
+        if (mainEl) {
+          const mainStyle = getComputedStyle(mainEl);
+          available =
+            mainEl.clientWidth -
+            (parseFloat(mainStyle.paddingLeft) || 0) -
+            (parseFloat(mainStyle.paddingRight) || 0);
+        }
+        const seed = Math.round(
+          Math.max(160, Math.min(available > 0 ? available * 0.4 : 320, 420)),
+        );
+        rightEl.style.width = `${seed}px`;
+      }
+
       const leftRect = leftEl.getBoundingClientRect();
-      // Lajur kiri belum bersaiz (cth. semasa tukar halaman) — cuba lagi nanti.
-      if (leftRect.width < 160) return;
+      // Masih tiada ruang untuk lajur kiri — kekalkan lebar awal dan cuba lagi
+      // bila ResizeObserver / resize event seterusnya datang.
+      if (leftRect.width < 120) return;
 
       let stage = leftRect.height;
       if (!Number.isFinite(stage) || stage < 80) stage = 480;
 
       // Lelaran: lebar poster 0.75 × tinggi poster; setiap perubahan lebar
       // poster mengubah lebar (dan seterusnya tinggi) stack kiri.
-      for (let pass = 0; pass < 6; pass += 1) {
+      for (let pass = 0; pass < 8; pass += 1) {
         const posterWidth = Math.max(120, Math.round(stage * 0.75));
         rightEl.style.width = `${posterWidth}px`;
 
