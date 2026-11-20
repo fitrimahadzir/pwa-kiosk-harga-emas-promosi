@@ -25,7 +25,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
   preset,
 }) => {
   return (
-    <section className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <section className="mx-auto w-full max-w-6xl animate-in fade-in slide-in-from-bottom-2 duration-300">
       {/* Page header */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -44,7 +44,7 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
             </div>
             <div>
               <h1 className="font-serif text-xl font-black tracking-wide text-maroon-deep sm:text-2xl">
-                Kalkulator Jualan
+                Kalkulator &amp; Sebut Harga
               </h1>
               <p className="text-[11px] text-maroon/60 sm:text-xs">
                 Kiraan serta-merta termasuk kos emas, upah tukang, diskaun & trade-in

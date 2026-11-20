@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Copy, ShoppingBag, Sparkles } from 'lucide-react';
 import { PromoItem } from '../types/gold';
 import { formatMYR } from '../utils/calculator';
+import { DetailPageBanner } from './DetailPageBanner';
 
 interface PromoDetailPageProps {
   promo: PromoItem;
@@ -73,18 +74,17 @@ export const PromoDetailPage: React.FC<PromoDetailPageProps> = ({
       </div>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:gap-6">
-        {/* Left: the poster the user tapped */}
-        <div className="flex items-center justify-center overflow-hidden rounded-2xl border border-[#d4a13a]/30 bg-[#2a0404] p-3 shadow-xl sm:p-4">
-          <img
-            src={promo.imageUrl}
-            alt={title}
-            className="max-h-[68vh] w-full rounded-xl object-contain"
-          />
-        </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-6">
+        {/* Left: poster yang ditekan — guna banner kongsi seperti page staff */}
+        <DetailPageBanner
+          imageUrl={promo.imageUrl}
+          alt={title}
+          title={title}
+          fit="contain"
+        />
 
         {/* Right: description + quick purchase */}
-        <div className="gr-card-light flex flex-col gap-5 p-5 sm:p-6">
+        <div className="gr-card-light flex flex-col gap-4 p-5 sm:p-6">
           <div>
             <p className="gr-kicker-light">Pakej Promosi</p>
             <h2 className="mt-1.5 font-heading text-2xl font-bold leading-tight text-maroon-deep sm:text-3xl">

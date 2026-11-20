@@ -4,6 +4,8 @@ import {
   GoldPurity,
   PromoItem,
   PriceHistoryEntry,
+  QuotationResult,
+  ReceiptRecord,
   ShopSettings,
 } from '../types/gold';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -613,6 +615,197 @@ export async function fetchOutletHistory(
       oldBuyPrice: Number(row.old_buy ?? 0),
       newBuyPrice: Number(row.new_buy ?? 0),
       adminNote: row.note ?? undefined,
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// Resit / sebut harga (satu baris bagi setiap resit yang disahkan staf)
+// ---------------------------------------------------------------------------
+
+type ReceiptRow = {
+  id?: number | string;
+  receipt_number?: string | null;
+  quote_id?: string | null;
+  outlet_name?: string | null;
+  created_at?: string | null;
+  purity?: string | null;
+  karat?: string | null;
+  weight?: number | string | null;
+  price_per_gram?: number | string | null;
+  gold_cost?: number | string | null;
+  workmanship?: number | string | null;
+  subtotal?: number | string | null;
+  discount_amount?: number | string | null;
+  has_trade_in?: boolean | null;
+  trade_in_purity?: string | null;
+  trade_in_weight?: number | string | null;
+  trade_in_rate?: number | string | null;
+  trade_in_amount?: number | string | null;
+  final_total?: number | string | null;
+  package_price?: number | string | null;
+  package_title?: string | null;
+};
+
+const RECEIPT_COLUMNS = [
+  'id',
+  'receipt_number',
+  'quote_id',
+  'outlet_name',
+  'created_at',
+  'purity',
+  'karat',
+  'weight',
+  'price_per_gram',
+  'gold_cost',
+  'workmanship',
+  'subtotal',
+  'discount_amount',
+  'has_trade_in',
+  'trade_in_purity',
+  'trade_in_weight',
+  'trade_in_rate',
+  'trade_in_amount',
+  'final_total',
+  'package_price',
+  'package_title',
+].join(', ');
+
+/** Hasil simpanan resit — dipaparkan sebagai status di lajur sebut harga. */
+export type ReceiptSaveResult =
+  | { ok: true; id: string; quoteId: string; receiptNumber: string }
+  | { ok: false; error: string };
+
+/**
+ * Simpan satu resit dari kiosk. Klien tiada INSERT terus — RPC SECURITY DEFINER
+ * yang melakukan tulisan DAN menjana nombor GRJ (lihat
+ * supabase/migrate-receipt-numbers.sql dan migrate-quotation-save.sql).
+ * Dipanggil bila staf menekan "Jana Sebut Harga" atau "Simpan Rekod" pada slip.
+ *
+ * `createdBy` (user id Supabase Auth, jika ada sesi) dihantar sebagai maklumat
+ * audit. RPC lama mengabaikan kunci tambahan ini — tiada perubahan diperlukan
+ * pada frontend jika migrasi belum dijalankan.
+ */
+export async function pushReceipt(
+  quote: QuotationResult,
+  outletName: string,
+  createdBy?: string | null,
+  createdByEmail?: string | null,
+): Promise<ReceiptSaveResult> {
+  const outlet = outletName.trim();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: 'Supabase belum dikonfigurasi.' };
+  }
+  if (!outlet) return { ok: false, error: 'Tiada outlet dipilih.' };
+  if (!quote.quoteId) return { ok: false, error: 'No. sebut harga tidak sah.' };
+
+  try {
+    const { data, error } = await supabase.rpc('record_kiosk_receipt', {
+      p_payload: {
+        quoteId: quote.quoteId,
+        outletName: outlet,
+        createdBy: createdBy?.trim() || '',
+        createdByEmail: createdByEmail?.trim() || '',
+        purity: quote.purity,
+        karat: quote.karat,
+        weight: quote.weight,
+        pricePerGram: quote.pricePerGram,
+        goldCost: quote.goldCost,
+        workmanship: quote.workmanship,
+        subtotal: quote.subtotal,
+        discountAmount: quote.discountAmount,
+        hasTradeIn: quote.hasTradeIn,
+        tradeInPurity: quote.tradeInPurity,
+        tradeInWeight: quote.tradeInWeight,
+        tradeInRate: quote.tradeInRate,
+        tradeInAmount: quote.tradeInAmount,
+        finalTotal: quote.finalTotal,
+        packagePrice: quote.packagePrice ?? 0,
+        packageTitle: quote.packageTitle ?? '',
+      },
+    });
+
+    if (error) {
+      console.warn('[emaspos] Gagal menyimpan resit:', error.message);
+      return { ok: false, error: error.message || 'Gagal menyimpan resit.' };
+    }
+
+    // RPC mesti memulangkan jsonb { id, receiptNumber, quoteId, createdAt }.
+    // JANGAN guna quoteId sebagai nombor resit — itu nombor lama QT-… dan
+    // Pengguna tak mahu ia muncul pada resit. Server lama = ralat jelas.
+    const raw = data as
+      | { id?: number | string; receiptNumber?: string }
+      | number
+      | string
+      | null;
+    const payload = raw && typeof raw === 'object' ? raw : null;
+    const legacyId =
+      typeof raw === 'number' || typeof raw === 'string' ? String(raw) : '';
+    const receiptNumber =
+      typeof payload?.receiptNumber === 'string' ? payload.receiptNumber.trim() : '';
+
+    if (!receiptNumber) {
+      const message =
+        'Server belum menjana nombor resit GRJ. Jalankan supabase/migrate-receipt-numbers.sql dalam Supabase SQL Editor.';
+      console.warn('[emaspos]', message);
+      return { ok: false, error: message };
+    }
+
+    return {
+      ok: true,
+      id: String(payload?.id ?? '') || legacyId || quote.quoteId,
+      quoteId: quote.quoteId,
+      receiptNumber,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Gagal menyimpan resit.';
+    console.warn('[emaspos] Gagal menyimpan resit:', message);
+    return { ok: false, error: message };
+  }
+}
+
+/** Baca senarai resit terkini (admin sahaja, melalui polisi RLS). */
+export async function fetchReceipts(): Promise<ReceiptRecord[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase
+    .from('kiosk_receipts')
+    .select(RECEIPT_COLUMNS)
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.warn('[emaspos] Gagal membaca resit:', error.message);
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+
+  return (data as ReceiptRow[])
+    .filter((row) => typeof row.quote_id === 'string' && Boolean(row.quote_id))
+    .map((row) => ({
+      id: String(row.id ?? ''),
+      // Resit lama tiada receipt_number — paparan guna no. rujukan lama.
+      receiptNumber: String(row.receipt_number ?? '').trim() || String(row.quote_id),
+      quoteId: String(row.quote_id),
+      outletName: row.outlet_name ?? '',
+      createdAt: row.created_at ?? new Date().toISOString(),
+      purity: (isGoldPurity(row.purity ?? '') ? row.purity : '916') as GoldPurity,
+      karat: row.karat ?? '',
+      weight: Number(row.weight ?? 0),
+      pricePerGram: Number(row.price_per_gram ?? 0),
+      goldCost: Number(row.gold_cost ?? 0),
+      workmanship: Number(row.workmanship ?? 0),
+      subtotal: Number(row.subtotal ?? 0),
+      discountAmount: Number(row.discount_amount ?? 0),
+      hasTradeIn: Boolean(row.has_trade_in),
+      tradeInPurity: (isGoldPurity(row.trade_in_purity ?? '')
+        ? row.trade_in_purity
+        : '916') as GoldPurity,
+      tradeInWeight: Number(row.trade_in_weight ?? 0),
+      tradeInRate: Number(row.trade_in_rate ?? 0),
+      tradeInAmount: Number(row.trade_in_amount ?? 0),
+      finalTotal: Number(row.final_total ?? 0),
+      packagePrice: Number(row.package_price ?? 0),
+      packageTitle: row.package_title ?? '',
     }));
 }
 

@@ -27,6 +27,7 @@ import {
   Pencil,
   ChevronUp,
   ChevronDown,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -46,6 +47,7 @@ import { DEFAULT_PRICES, deletePromoImage, uploadPromoImage } from '../utils/sto
 import { isSupabaseConfigured, supabase, supabaseConfig } from '../lib/supabase';
 import { isStandalonePwa } from '../utils/device';
 import { AnnouncementTicker } from './AnnouncementTicker';
+import { ReceiptReport } from './ReceiptReport';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -69,7 +71,7 @@ interface AdminModalProps {
   onResetDefaults: () => Promise<void>;
 }
 
-type AdminTab = 'prices' | 'promos' | 'announcement' | 'history' | 'settings';
+type AdminTab = 'prices' | 'promos' | 'announcement' | 'history' | 'reports' | 'settings';
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
@@ -123,6 +125,7 @@ const NAV_ITEMS: { id: AdminTab; label: string; icon: LucideIcon }[] = [
   { id: 'promos', label: 'Promosi', icon: ImageIcon },
   { id: 'announcement', label: 'Pengumuman', icon: Megaphone },
   { id: 'history', label: 'Sejarah', icon: History },
+  { id: 'reports', label: 'Laporan', icon: FileText },
   { id: 'settings', label: 'Tetapan', icon: SettingsIcon },
 ];
 
@@ -149,6 +152,12 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
     kicker: 'Audit',
     title: 'Log Sejarah',
     description: 'Rekod perubahan harga jualan dan belian semula.',
+  },
+  reports: {
+    kicker: 'Laporan',
+    title: 'Laporan Resit',
+    description:
+      'Senarai resit yang disahkan staf di semua tablet kaunter. Muat turun sebagai PDF atau Excel.',
   },
   settings: {
     kicker: 'Sistem',
@@ -2003,6 +2012,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </div>
             </section>
           )}
+
+          {activeTab === 'reports' && <ReceiptReport />}
 
           {activeTab === 'settings' && (
             <div className="mt-6 grid gap-4 lg:grid-cols-2">

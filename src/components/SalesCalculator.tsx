@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
-  Calculator, 
   RotateCcw, 
   FileText, 
   ArrowRightLeft, 
@@ -22,6 +21,10 @@ interface SalesCalculatorProps {
   onClose?: () => void;
   /** Pakej promosi dari halaman poster — harga tetap dipratetap. */
   preset?: { title: string; price: number } | null;
+  /** Laporkan sebut harga semasa kepada induk (untuk panel quote sisi). */
+  onQuoteChange?: (quote: QuotationResult) => void;
+  /** Papar kotak jumlah & jana resit.Dimatikan bila quote dipaparkan di lajur lain. */
+  showSummary?: boolean;
 }
 
 export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
@@ -31,10 +34,12 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
   onGenerateQuote,
   onClose,
   preset,
+  onQuoteChange,
+  showSummary = true,
 }) => {
-  // Local state for calculations
-  const [weight, setWeight] = useState<string>('5.00');
-  const [workmanship, setWorkmanship] = useState<string>('80');
+  // Sesi baru bermula kosong — hanya gred lalai (916) yang dikekalkan.
+  const [weight, setWeight] = useState<string>('');
+  const [workmanship, setWorkmanship] = useState<string>('');
   const [hasDiscount, setHasDiscount] = useState<boolean>(false);
   const [discount, setDiscount] = useState<string>('0');
   const [discountType, setDiscountType] = useState<'fixed' | 'percent'>('fixed');
@@ -65,6 +70,14 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
 
   const quotation = computeQuotation(calcInput, prices);
 
+  // computeQuotation menjana ID baru setiap render, jadi gunakan tandatangan
+  // input — bukan objek quote — sebagai pencetus laporan kepada induk.
+  const quoteSignature = `${JSON.stringify(calcInput)}|${currentRate}|${prices[selectedPurity]?.karat ?? ''}`;
+  useEffect(() => {
+    onQuoteChange?.(quotation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteSignature, onQuoteChange]);
+
   // Quick weight addition helper
   const addWeight = (delta: number) => {
     const current = parseFloat(weight) || 0;
@@ -77,8 +90,11 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
     setWorkmanship('');
     setHasDiscount(false);
     setDiscount('0');
+    setDiscountType('fixed');
     setHasTradeIn(false);
+    setTradeInPurity('916');
     setTradeInWeight('');
+    onPurityChange('916');
   };
 
   return (
@@ -86,21 +102,9 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
       
       {/* Top Header of Calculator */}
       <div className="flex items-center justify-between pb-2.5 border-b border-line/15">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-xl bg-gold/15 text-gold-deep border border-gold-deep/25">
-            <Calculator size={16} />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-maroon-deep font-serif tracking-wide">
-              Kalkulator Jualan Pantas
-            </h2>
-            <p className="text-[10px] text-maroon/55">
-              {isPackage
-                ? 'Harga pakej tetap — boleh tambah diskaun & trade-in'
-                : 'Kiraan serta-merta termasuk kos emas, upah & trade-in'}
-            </p>
-          </div>
-        </div>
+        <h2 className="text-sm font-bold text-maroon-deep font-serif tracking-wide">
+          Kalkulator Pantas
+        </h2>
 
         <div className="flex items-center gap-1.5">
           <button
@@ -389,7 +393,8 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
 
       </div>
 
-      {/* Breakdown and Grand Total Box */}
+      {/* Breakdown and Grand Total Box — hanya dipapar bila tiada panel quote */}
+      {showSummary && (
       <div className="bg-gold/10 border border-gold-deep/30 rounded-2xl p-2.5 sm:p-3 shadow-sm mt-0.5">
         
         {/* Subtotal line items */}
@@ -453,6 +458,7 @@ export const SalesCalculator: React.FC<SalesCalculatorProps> = ({
           <span>Jana Resit Sebut Harga (Quotation Slip)</span>
         </button>
       </div>
+      )}
 
     </div>
   );

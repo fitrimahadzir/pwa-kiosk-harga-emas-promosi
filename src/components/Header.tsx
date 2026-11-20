@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, LogOut, Calculator, ShieldCheck } from 'lucide-react';
+import React from 'react';
+import { LogOut, Calculator, ShieldCheck, Users } from 'lucide-react';
 import { ShopSettings } from '../types/gold';
 import { BrandLogo } from './BrandLogo';
 
@@ -10,6 +10,9 @@ interface HeaderProps {
   lastSyncTime?: string;
   showCalculator?: boolean;
   onToggleCalculator?: () => void;
+  /** Buka halaman prestasi staff (butang menggantikan widget jam lama). */
+  onOpenStaff?: () => void;
+  showStaff?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,29 +21,14 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdmin,
   showCalculator = false,
   onToggleCalculator,
+  onOpenStaff,
+  showStaff = false,
 }) => {
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
-
-  // Digital clock update every second
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Format date in Malay format (e.g. "Khamis, 6 November 2026")
-  const formattedDate = currentTime.toLocaleDateString('ms-MY', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  });
-
-  const formattedTime = currentTime.toLocaleTimeString('ms-MY', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  });
+  const staffButtonClass = `inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
+    showStaff
+      ? 'border-gold bg-gold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)]'
+      : 'border-gold/40 bg-transparent text-gold-soft hover:border-gold/60 hover:bg-gold/10 hover:text-gold'
+  }`;
 
   return (
     <>
@@ -57,12 +45,19 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          {/* Live Clock & Controls */}
+          {/* Controls — Staff button replaces the old clock/timer widget,
+              sitting immediately to the left of the calculator button. */}
           <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-            {/* Clock Widget - icon only */}
-            <div className="flex items-center justify-center rounded-lg border border-line/60 bg-maroon/30 px-1.5 py-1">
-              <Clock size={15} className="text-gold" />
-            </div>
+            {onOpenStaff && (
+              <button
+                onClick={onOpenStaff}
+                className={staffButtonClass}
+                title="Lihat Prestasi Staff"
+              >
+                <Users size={15} />
+                <span className="hidden sm:inline">Staff</span>
+              </button>
+            )}
 
             {/* Calculator Toggle Button */}
             {onToggleCalculator && (

@@ -26,6 +26,8 @@ import {
   fetchAnnouncement,
   pushAnnouncement,
   fetchOutletHistory,
+  pushReceipt,
+  type ReceiptSaveResult,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
 import { useLandscapeOrientation, usePromoStageHeight } from './hooks/usePromoStageHeight';
@@ -34,9 +36,12 @@ import { GoldPriceBoard } from './components/GoldPriceBoard';
 import { AnnouncementTicker } from './components/AnnouncementTicker';
 import { PromoCarousel } from './components/PromoCarousel';
 import { PromoDetailPage } from './components/PromoDetailPage';
+import { StaffPage } from './components/StaffPage';
+import { DEMO_STAFF_PERFORMANCE } from './data/staffPerformance';
 import { QuotationModal } from './components/QuotationModal';
 import { AdminModal } from './components/AdminModal';
 import { CalculatorPage } from './components/CalculatorPage';
+import { Calculator2Page } from './components/Calculator2Page';
 import { LoginPage } from './components/LoginPage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -48,7 +53,7 @@ const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-type Page = 'home' | 'calculator' | 'promo';
+type Page = 'home' | 'calculator' | 'calculator-alt' | 'promo' | 'staff';
 
 type Route = {
   admin: boolean;
@@ -63,7 +68,11 @@ function parseHash(): Route {
   const key = segment.toLowerCase();
 
   if (key === 'admin') return { admin: true, page: 'home', promoId: null };
+  // `#/kalkulator` ialah versi utama (kalkulator + sebut harga).
+  // `#/kalkulator2` mengekalkan versi lama.
   if (key === 'kalkulator') return { admin: false, page: 'calculator', promoId: null };
+  if (key === 'kalkulator2') return { admin: false, page: 'calculator-alt', promoId: null };
+  if (key === 'staff') return { admin: false, page: 'staff', promoId: null };
   if (key === 'promo' && rest.length > 0) {
     return {
       admin: false,
@@ -126,6 +135,8 @@ export default function App() {
 
   // Modals
   const [activeQuotation, setActiveQuotation] = useState<QuotationResult | null>(null);
+  /** Nombor resitGRJ yang sudah disimpan, indeks mengikut quoteId. */
+  const [savedReceiptNumbers, setSavedReceiptNumbers] = useState<Record<string, string>>({});
 
   // Admin session (Supabase Auth). Verified on boot and fail-closed.
   const [adminSession, setAdminSession] = useState<AdminSession | null>(null);
@@ -139,6 +150,11 @@ export default function App() {
     page === 'promo' && route.promoId
       ? promos.find((promo) => promo.id === route.promoId && promo.isActive) ?? null
       : null;
+
+  // Nombor resit rasmi (jika sudah disimpan) ditunjukkan pada slip & cetakan.
+  const activeReceiptNumber = activeQuotation
+    ? savedReceiptNumbers[activeQuotation.quoteId] ?? ''
+    : '';
 
   // Stage kiosk: dalam paparan melintang, tinggi poster promosi diselaraskan
   // dengan tinggi papan harga + banner 3:1 + kalkulator.
@@ -156,15 +172,56 @@ export default function App() {
     window.location.hash =
       nextPage === 'calculator'
         ? '/kalkulator'
-        : nextPromoId
-          ? `/promo/${encodeURIComponent(nextPromoId)}`
-          : '/';
+        : nextPage === 'calculator-alt'
+          ? '/kalkulator2'
+          : nextPage === 'staff'
+            ? '/staff'
+            : nextPromoId
+              ? `/promo/${encodeURIComponent(nextPromoId)}`
+              : '/';
+    // Sesi kalkulator baru sentiasa bermula dengan gred lalai 916.
+    // Input lain (berat, upah, diskaun, trade-in) dikosongkan oleh SalesCalculator.
+    if (nextPage === 'calculator' || nextPage === 'calculator-alt') {
+      setSelectedPurity('916');
+    }
     setPage(nextPage);
     setRoute({ admin: false, page: nextPage, promoId: nextPromoId });
     // Kiosk: terus ke atas tanpa animasi supaya tiada susun atur "separuh siap"
     // kelihatan sebaik balik dari halaman detail.
     window.scrollTo({ top: 0 });
   };
+
+  /** Buka slip — GRJ dijana oleh Calculator2Page sebelum slip dibuka. */
+  const handleGenerateQuote = useCallback((quote: QuotationResult) => {
+    setActiveQuotation(quote);
+  }, []);
+
+  /**
+   * Tulis resit dan jana GRJ di server. Digunakan oleh "Jana Sebut Harga"
+   * dan butang "Simpan Rekod" pada slip. `pushReceipt` ialah satu-satunya
+   * laluan tulisan: RPC SECURITY DEFINER di Supabase yang menyemak outlet
+   * aktif dan (kini) mengelakkan rekod berganda untuk quote yang sama.
+   */
+  const handleSaveReceipt = useCallback(
+    async (quote: QuotationResult): Promise<ReceiptSaveResult> => {
+      const outlet = currentOutletName?.trim();
+      if (!outlet) return { ok: false, error: 'Tiada outlet dipilih.' };
+      const result = await pushReceipt(
+        quote,
+        outlet,
+        adminSession?.userId,
+        adminSession?.email,
+      );
+      if (result.ok) {
+        setSavedReceiptNumbers((prev) => ({
+          ...prev,
+          [quote.quoteId]: result.receiptNumber,
+        }));
+      }
+      return result;
+    },
+    [currentOutletName, adminSession?.userId, adminSession?.email],
+  );
 
   const openCalculator = () => {
     setPromoPreset(null);
@@ -188,13 +245,20 @@ export default function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const next = parseHash();
+      // Juga selamat untuk navigasi terus/back/forward ke URL kalkulator.
+      if (
+        (next.page === 'calculator' || next.page === 'calculator-alt') &&
+        next.page !== page
+      ) {
+        setSelectedPurity('916');
+      }
       setRoute(next);
       setPage(next.page);
       if (next.admin) setLoginError('');
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [page]);
 
   // Buang cache localStorage lama sekali — semua data kini dari Supabase.
   useEffect(() => {
@@ -650,21 +714,38 @@ export default function App() {
         settings={settings}
         onLogout={handleExitOutlet}
         onOpenAdmin={openAdmin}
-        showCalculator={page === 'calculator'}
+        showCalculator={page === 'calculator' || page === 'calculator-alt'}
         onToggleCalculator={() =>
-          page === 'calculator' ? navigateTo('home') : openCalculator()
+          page === 'calculator' || page === 'calculator-alt'
+            ? navigateTo('home')
+            : openCalculator()
         }
+        showStaff={page === 'staff'}
+        onOpenStaff={() => navigateTo('staff')}
       />
 
       {/* 2. MAIN CONTENT */}
       {page === 'calculator' ? (
-        /* Dedicated calculator page */
+        /* Versi utama: kalkulator + sebut harga */
         <main key="calculator-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          <Calculator2Page
+            prices={prices}
+            selectedPurity={selectedPurity}
+            onPurityChange={setSelectedPurity}
+            onGenerateQuote={handleGenerateQuote}
+            onBack={() => navigateTo('home')}
+            preset={promoPreset}
+            onSaveReceipt={handleSaveReceipt}
+          />
+        </main>
+      ) : page === 'calculator-alt' ? (
+        /* Versi lama kalkulator (dihalakan ke #/kalkulator2) */
+        <main key="calculator-alt-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           <CalculatorPage
             prices={prices}
             selectedPurity={selectedPurity}
             onPurityChange={setSelectedPurity}
-            onGenerateQuote={(quote) => setActiveQuotation(quote)}
+            onGenerateQuote={handleGenerateQuote}
             onBack={() => navigateTo('home')}
             preset={promoPreset}
           />
@@ -678,6 +759,14 @@ export default function App() {
             shopPhone={settings.phone}
             onBack={() => navigateTo('home')}
             onBuy={buyFromPromo}
+          />
+        </main>
+      ) : page === 'staff' ? (
+        /* Dedicated staff performance page */
+        <main key="staff-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          <StaffPage
+            performance={DEMO_STAFF_PERFORMANCE}
+            onBack={() => navigateTo('home')}
           />
         </main>
       ) : (
@@ -786,6 +875,9 @@ export default function App() {
       <QuotationModal
         quote={activeQuotation}
         settings={settings}
+        receiptNumber={activeReceiptNumber}
+        outletName={currentOutletName ?? undefined}
+        onSaveReceipt={handleSaveReceipt}
         onClose={() => setActiveQuotation(null)}
       />
 

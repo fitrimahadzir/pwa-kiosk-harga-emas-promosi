@@ -59,6 +59,22 @@ export interface OutletConfig {
   updatedAt: string;
 }
 
+/** Jualan semasa seorang staff di satu outlet. */
+export interface StaffSale {
+  name: string;
+  sale: number;
+}
+
+/**
+ * Prestasi jualan bagi satu outlet.
+ * `total` ialah gabungan jualan semua staff dalam outlet ini.
+ */
+export interface OutletStaffPerformance {
+  outlet: string;
+  staff: StaffSale[];
+  total: number;
+}
+
 export interface CalculatorInput {
   purity: GoldPurity;
   weight: number;
@@ -95,4 +111,30 @@ export interface QuotationResult {
   /** Harga tetap pakej promosi (jika sebut harga dijana dari poster). */
   packagePrice?: number;
   packageTitle?: string;
+}
+
+/** Satu resit / sebut harga yang disimpan di Supabase untuk laporan admin. */
+export interface ReceiptRecord {
+  id: string;
+  /** Nombor resit rasmi dari server. Resit lama guna quoteId sebagai fallback. */
+  receiptNumber: string;
+  quoteId: string;
+  outletName: string;
+  createdAt: string;
+  purity: GoldPurity;
+  karat: string;
+  weight: number;
+  pricePerGram: number;
+  goldCost: number;
+  workmanship: number;
+  subtotal: number;
+  discountAmount: number;
+  hasTradeIn: boolean;
+  tradeInPurity: GoldPurity;
+  tradeInWeight: number;
+  tradeInRate: number;
+  tradeInAmount: number;
+  finalTotal: number;
+  packagePrice: number;
+  packageTitle: string;
 }
