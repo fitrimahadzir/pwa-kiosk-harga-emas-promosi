@@ -27,6 +27,7 @@ import {
   pushAnnouncement,
   fetchOutletHistory,
   pushReceipt,
+  updateOutletContact,
   type ReceiptSaveResult,
 } from './utils/storage';
 import { useSupabaseRealtime } from './hooks/useSupabaseRealtime';
@@ -604,6 +605,24 @@ export default function App() {
     setAnnouncement(saved.message);
   };
 
+  /**
+   * Maklumat outlet (alamat & telefon) ditulis ke `kiosk_outlets` melalui RPC
+   * admin. RPC juga menyegerakkan `kiosk_settings`; kiosk menerima perubahan
+   * secara realtime melalui langganan sedia ada.
+   */
+  const handleUpdateOutletContact = async (
+    outletName: string,
+    address: string,
+    phone: string,
+  ): Promise<void> => {
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
+    }
+
+    await updateOutletContact(outletName, address, phone);
+    await Promise.all([refreshPromosAndSettings(), refreshOutlets()]);
+  };
+
   // Reset harga + tetapan ke nilai asal (poster promosi tidak dipadam).
   const handleResetDefaults = async (): Promise<void> => {
     const outletName = currentOutletName;
@@ -617,6 +636,9 @@ export default function App() {
     await Promise.all([
       pushOutletPrices(outletName, DEFAULT_PRICES, 'Pulihkan harga asal'),
       pushOutletSettings(outletName, defaults),
+      // Alamat & telefon juga dikosongkan di `kiosk_outlets` supaya sumber
+      // resit konsisten selepas "Pulihkan data asal".
+      updateOutletContact(outletName, '', ''),
     ]);
 
     setPrices(DEFAULT_PRICES);
@@ -680,6 +702,7 @@ export default function App() {
           onUpdatePromos={handleUpdatePromos}
           announcement={announcement}
           onUpdateAnnouncement={handleUpdateAnnouncement}
+          onUpdateOutletContact={handleUpdateOutletContact}
           history={history}
           onResetDefaults={handleResetDefaults}
         />

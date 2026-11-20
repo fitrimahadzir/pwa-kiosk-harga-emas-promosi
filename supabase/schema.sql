@@ -240,7 +240,8 @@ select
   v.address,
   v.phone
 from (values
-  ('Amanjaya Mall', 'No. 18-G, Jalan Sultan Ismail, 50250 Kuala Lumpur', '012-8899 375'),
+  -- Alamat & telefon sengaja kosong — diisi oleh admin di panel Tetapan.
+  ('Amanjaya Mall', '', ''),
   ('HQ Warehouse', '', '')
 ) as v(name, address, phone)
 where not exists (
@@ -404,6 +405,83 @@ $$;
 
 revoke all on function public.kiosk_outlet_details() from public;
 grant execute on function public.kiosk_outlet_details() to anon, authenticated;
+
+-- Tulisan admin untuk maklumat outlet. Klien tiada UPDATE langsung ke atas
+-- `kiosk_outlets`; RPC ini yang menyemak kiosk_admins dan mensinkronkan
+-- `kiosk_settings` (sumber bacaan resit kiosk).
+create or replace function public.update_kiosk_outlet_contact(
+  p_name text,
+  p_address text,
+  p_phone text
+)
+returns table (name text, address text, phone text)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text := btrim(coalesce(p_name, ''));
+  v_address text := btrim(coalesce(p_address, ''));
+  v_phone text := btrim(coalesce(p_phone, ''));
+  v_admin_outlet text;
+begin
+  if auth.uid() is null or not public.is_kiosk_admin() then
+    raise exception 'Akses ditolak: pentadbir sahaja.';
+  end if;
+
+  if v_name = '' then
+    raise exception 'Nama outlet diperlukan.';
+  end if;
+  if char_length(v_address) > 500 then
+    raise exception 'Alamat terlalu panjang (maksimum 500 aksara).';
+  end if;
+  if char_length(v_phone) > 50 then
+    raise exception 'Nombor telefon terlalu panjang (maksimum 50 aksara).';
+  end if;
+
+  select a.outlet_name into v_admin_outlet
+  from public.kiosk_admins a
+  where a.user_id = auth.uid()
+    and a.is_active
+  limit 1;
+
+  if coalesce(v_admin_outlet, '') <> '' and v_admin_outlet <> v_name then
+    raise exception 'Akses ditolak: admin ini hanya dibenarkan untuk outlet %', v_admin_outlet;
+  end if;
+
+  update public.kiosk_outlets o
+     set address = v_address,
+         phone = v_phone,
+         updated_at = now()
+   where o.name = v_name
+     and o.is_active
+     and o.role = 'outlet';
+
+  if not found then
+    raise exception 'Outlet "%" tidak dijumpai atau tidak aktif.', v_name;
+  end if;
+
+  insert into public.kiosk_settings
+    (outlet_name, shop_name, branch, phone, address, tagline, currency)
+  values
+    (v_name, '', '', v_phone, v_address, '', 'MYR')
+  on conflict (outlet_name) do update
+     set phone = excluded.phone,
+         address = excluded.address,
+         updated_at = now();
+
+  return query
+    select o.name, o.address, o.phone
+      from public.kiosk_outlets o
+     where o.name = v_name;
+end;
+$$;
+
+revoke all on function public.update_kiosk_outlet_contact(text, text, text) from public;
+grant execute on function public.update_kiosk_outlet_contact(text, text, text) to authenticated;
+
+comment on function public.update_kiosk_outlet_contact(text, text, text) is
+  'Admin sahaja: kemas kini alamat & telefon kiosk_outlets + kiosk_settings.';
 
 -- ---------------------------------------------------------------------------
 -- 6. RLS + GRANT (inti "block outlet daripada input")
@@ -677,6 +755,15 @@ begin
       and tablename = 'kiosk_announcement'
   ) then
     alter publication supabase_realtime add table public.kiosk_announcement;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'kiosk_outlets'
+  ) then
+    alter publication supabase_realtime add table public.kiosk_outlets;
   end if;
 exception
   when undefined_object then

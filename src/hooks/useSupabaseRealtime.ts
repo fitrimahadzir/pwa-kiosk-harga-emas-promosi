@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { subscribeToOutletChanges } from '../utils/storage';
 
 /**
- * Langgan perubahan Supabase (harga, poster, tetapan) untuk satu outlet.
+ * Langgan perubahan Supabase (harga, poster, tetapan, maklumat outlet)
+ * untuk satu outlet.
  *
  * Mesej realtime hanya dijadikan ISYARAT. Pemanggil (`App`) mesti fetch
  * semula data daripada jadual — payload tidak dipercayai dan tidak pernah

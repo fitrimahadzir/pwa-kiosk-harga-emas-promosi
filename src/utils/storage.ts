@@ -59,8 +59,9 @@ export const DEFAULT_SETTINGS: ShopSettings = {
   shopName: 'GOLD RESERVE',
   outletName: 'Amanjaya Mall',
   branch: 'Cawangan Utama (Kaunter Jualan)',
-  phone: '012-8899 375',
-  address: 'No. 18-G, Jalan Sultan Ismail, 50250 Kuala Lumpur',
+  // Sengaja kosong — alamat & telefon diisi oleh admin melalui tetapan outlet.
+  phone: '',
+  address: '',
   tagline: 'Ketulenan Terjamin • Nilai Warisan Sepanjang Zaman',
   currency: 'MYR',
 };
@@ -459,6 +460,37 @@ type SettingsRow = {
   currency?: string | null;
 };
 
+/** Maklumat awam outlet dari `kiosk_outlets` (nama, alamat, telefon). */
+export interface OutletContact {
+  name: string;
+  address: string;
+  phone: string;
+}
+
+/**
+ * Senarai outlet sebenar dari `kiosk_outlets` melalui fungsi SECURITY DEFINER.
+ * `code` / `role` tidak pernah dibaca oleh klien.
+ */
+export async function fetchOutletContacts(): Promise<OutletContact[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase.rpc('kiosk_outlet_details');
+  if (error) {
+    // Migrasi belum dijalankan — pemanggil boleh guna senarai nama sedia ada.
+    console.warn('[emaspos] Gagal membaca maklumat outlet:', error.message);
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+
+  return (data as OutletContact[])
+    .map((row) => ({
+      name: String(row?.name ?? '').trim(),
+      address: String(row?.address ?? ''),
+      phone: String(row?.phone ?? ''),
+    }))
+    .filter((row) => row.name);
+}
+
 /** Baca tetapan outlet dari server; fallback kepada nilai lalai jika tiada. */
 export async function fetchOutletSettings(outletName: string): Promise<ShopSettings> {
   const fallback: ShopSettings = { ...DEFAULT_SETTINGS, outletName };
@@ -475,18 +507,58 @@ export async function fetchOutletSettings(outletName: string): Promise<ShopSetti
     console.warn('[emaspos] Gagal membaca tetapan outlet:', error.message);
     return fallback;
   }
-  if (!data) return fallback;
 
-  const row = data as SettingsRow;
+  const row = (data ?? null) as SettingsRow | null;
+
+  // Alamat & telefon yang disimpan di `kiosk_outlets` (melalui tetapan admin)
+  // diutamakan. Jika belum ada, gunakan nilai daripada `kiosk_settings`.
+  const contacts = await fetchOutletContacts().catch(() => []);
+  const contact = contacts.find((item) => item.name === outletName);
+
   return {
-    shopName: row.shop_name ?? fallback.shopName,
+    shopName: row?.shop_name ?? fallback.shopName,
     outletName,
-    branch: row.branch ?? fallback.branch,
-    phone: row.phone ?? fallback.phone,
-    address: row.address ?? fallback.address,
-    tagline: row.tagline ?? fallback.tagline,
-    currency: row.currency ?? fallback.currency,
+    branch: row?.branch ?? fallback.branch,
+    phone:
+      (contact?.phone ?? '').trim() || row?.phone || fallback.phone,
+    address:
+      (contact?.address ?? '').trim() || row?.address || fallback.address,
+    tagline: row?.tagline ?? fallback.tagline,
+    currency: row?.currency ?? fallback.currency,
   };
+}
+
+/**
+ * Simpan alamat & telefon outlet. RPC SECURITY DEFINER menyemak sesi admin
+ * dan juga mengemas kini `kiosk_settings` supaya resit kiosk terus konsisten.
+ */
+export async function updateOutletContact(
+  outletName: string,
+  address: string,
+  phone: string,
+): Promise<OutletContact> {
+  const db = requireClient();
+
+  const { data, error } = await db.rpc('update_kiosk_outlet_contact', {
+    p_name: outletName.trim(),
+    p_address: address.trim(),
+    p_phone: phone.trim(),
+  });
+
+  if (error) {
+    throw new Error(`Gagal menyimpan maklumat outlet: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row) {
+    return {
+      name: String(row.name ?? outletName),
+      address: String(row.address ?? address),
+      phone: String(row.phone ?? phone),
+    };
+  }
+
+  return { name: outletName.trim(), address: address.trim(), phone: phone.trim() };
 }
 
 /** Simpan tetapan outlet ke server (admin sahaja). */
@@ -829,6 +901,15 @@ export function subscribeToOutletChanges(
     return !row || row.outlet_name === outletName;
   };
 
+  // `kiosk_outlets` guna lajur `name`, bukan `outlet_name`.
+  const matchesOutletRow = (payload: {
+    new?: Record<string, unknown> | null;
+    old?: Record<string, unknown> | null;
+  }) => {
+    const row = payload.new ?? payload.old;
+    return !row || row.name === outletName;
+  };
+
   const channel = supabase
     .channel(`kiosk_outlet:${outletName}`)
     .on(
@@ -851,6 +932,13 @@ export function subscribeToOutletChanges(
       { event: '*', schema: 'public', table: 'kiosk_settings' },
       (payload) => {
         if (matchesOutlet(payload)) onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_outlets' },
+      (payload) => {
+        if (matchesOutletRow(payload)) onChange();
       },
     )
     .on(

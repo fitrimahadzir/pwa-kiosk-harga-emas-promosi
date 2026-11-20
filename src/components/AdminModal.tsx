@@ -43,7 +43,13 @@ import {
   normalizeAnnouncementMessages,
   splitAnnouncementMessages,
 } from '../utils/announcement';
-import { DEFAULT_PRICES, deletePromoImage, uploadPromoImage } from '../utils/storage';
+import {
+  DEFAULT_PRICES,
+  deletePromoImage,
+  fetchOutletContacts,
+  uploadPromoImage,
+  type OutletContact,
+} from '../utils/storage';
 import { isSupabaseConfigured, supabase, supabaseConfig } from '../lib/supabase';
 import { isStandalonePwa } from '../utils/device';
 import { AnnouncementTicker } from './AnnouncementTicker';
@@ -67,6 +73,12 @@ interface AdminModalProps {
   /** Teks pengumuman kaunter global (semua outlet). */
   announcement: string;
   onUpdateAnnouncement: (message: string) => Promise<void>;
+  /** Simpan alamat & telefon outlet ke `kiosk_outlets` (admin sahaja). */
+  onUpdateOutletContact: (
+    outletName: string,
+    address: string,
+    phone: string,
+  ) => Promise<void>;
   history: PriceHistoryEntry[];
   onResetDefaults: () => Promise<void>;
 }
@@ -163,7 +175,7 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
     kicker: 'Sistem',
     title: 'Tetapan',
     description:
-      'Pantau sambungan Supabase, identiti pentadbir, dan penyelenggaraan data kiosk.',
+      'Kemas kini maklumat outlet untuk resit, pantau sambungan Supabase, dan selenggara data kiosk.',
   },
 };
 
@@ -286,6 +298,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onUpdatePromos,
   announcement,
   onUpdateAnnouncement,
+  onUpdateOutletContact,
   history,
   onResetDefaults,
 }) => {
@@ -463,10 +476,69 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   >('idle');
   const [supabaseTestMessage, setSupabaseTestMessage] = useState<string>('');
 
+  // ---- Tetapan maklumat outlet (alamat & telefon untuk resit) --------------
+  const [outletContacts, setOutletContacts] = useState<OutletContact[]>([]);
+  const [contactOutlet, setContactOutlet] = useState<string>('');
+  const [contactAddress, setContactAddress] = useState<string>('');
+  const [contactPhone, setContactPhone] = useState<string>('');
+  const [contactLoading, setContactLoading] = useState<boolean>(false);
+  const [contactSaving, setContactSaving] = useState<boolean>(false);
+  const [contactError, setContactError] = useState<string>('');
+  const [contactSuccess, setContactSuccess] = useState<string>('');
+
   // Keep promo drafts in sync with the selected outlet's stored data.
   useEffect(() => {
     setDraftPromos(promos);
   }, [promos]);
+
+  // Senarai outlet dibaca dari `kiosk_outlets`. Jika fungsi belum dipasang,
+  // gunakan senarai nama yang sudah disediakan oleh App.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+
+    setContactLoading(true);
+    void fetchOutletContacts()
+      .then((rows) => {
+        if (cancelled) return;
+        setOutletContacts(rows);
+        const names = rows.length
+          ? rows.map((row) => row.name)
+          : availableOutlets;
+        setContactOutlet((previous) => {
+          if (previous && names.includes(previous)) return previous;
+          if (currentOutletName && names.includes(currentOutletName)) {
+            return currentOutletName;
+          }
+          return names[0] ?? '';
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOutletContacts([]);
+        setContactOutlet(
+          availableOutlets.includes(currentOutletName)
+            ? currentOutletName
+            : availableOutlets[0] ?? '',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setContactLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, availableOutlets, currentOutletName]);
+
+  // Alamat & telefon sengaja dikosongkan pada setiap pertukaran outlet supaya
+  // admin mengisi sendiri nilai sebenar sebelum disimpan.
+  useEffect(() => {
+    setContactAddress('');
+    setContactPhone('');
+    setContactError('');
+    setContactSuccess('');
+  }, [contactOutlet]);
 
   const todayLabel = useMemo(
     () =>
@@ -515,6 +587,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   }, [matrixOutlets, outletPrices, currentOutletName, prices]);
 
   if (!isOpen) return null;
+
+  const contactOptions = outletContacts.length
+    ? outletContacts.map((item) => item.name)
+    : availableOutlets;
 
   const updateCell = (
     outletName: string,
@@ -917,6 +993,49 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           : 'Sambungan Supabase gagal. Sila semak konfigurasi dan rangkaian.',
       );
     }
+  };
+
+  const handleSaveOutletContact = async () => {
+    if (contactSaving || !contactOutlet) return;
+
+    const name = contactOutlet.trim();
+    const address = contactAddress.trim();
+    const phone = contactPhone.trim();
+
+    setContactSaving(true);
+    setContactError('');
+    setContactSuccess('');
+
+    try {
+      await onUpdateOutletContact(name, address, phone);
+      setOutletContacts((previous) => {
+        const row = { name, address, phone };
+        const exists = previous.some((item) => item.name === name);
+        const next = exists
+          ? previous.map((item) => (item.name === name ? row : item))
+          : [...previous, row];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setContactSuccess(
+        'Maklumat outlet disimpan di Supabase dan disiarkan ke kiosk secara realtime.',
+      );
+      window.setTimeout(() => setContactSuccess(''), 4500);
+    } catch (error) {
+      setContactError(
+        error instanceof Error
+          ? error.message
+          : 'Gagal menyimpan maklumat outlet ke Supabase.',
+      );
+    } finally {
+      setContactSaving(false);
+    }
+  };
+
+  const handleClearOutletContact = () => {
+    setContactAddress('');
+    setContactPhone('');
+    setContactError('');
+    setContactSuccess('');
   };
 
   const addAnnouncementEntry = () => {
@@ -2121,6 +2240,146 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <span>{supabaseTestMessage}</span>
                   </div>
                 )}
+              </section>
+
+              <section className="gr-card-light overflow-hidden lg:col-span-2">
+                <div className="border-b border-line/15 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-gold-deep/25 bg-gold/10 text-gold-deep">
+                        <MapPin className="size-5" />
+                      </span>
+                      <div>
+                        <p className="gr-kicker text-maroon">Outlet</p>
+                        <p className="mt-1.5 font-heading text-xl text-maroon-deep">
+                          Maklumat outlet
+                        </p>
+                        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-maroon-deep/55">
+                          Senarai outlet diambil dari{' '}
+                          <span className="font-semibold text-maroon-deep/75">
+                            kiosk_outlets
+                          </span>
+                          . Alamat dan telefon sengaja dikosongkan — isi nilai
+                          sebenar kemudian simpan. Resit kiosk dikemas kini
+                          secara realtime.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-line/20 bg-[#fbf6ef] px-3 py-1.5 text-[11px] font-semibold text-maroon-deep/65">
+                      {contactLoading ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <MapPin className="size-3.5" />
+                      )}
+                      {contactOptions.length} outlet
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="sm:col-span-2 lg:col-span-4">
+                    <label className={labelClass} htmlFor="admin-outlet-contact-select">
+                      Outlet
+                    </label>
+                    <select
+                      id="admin-outlet-contact-select"
+                      value={contactOutlet}
+                      onChange={(event) => setContactOutlet(event.target.value)}
+                      className={fieldClass}
+                      disabled={contactLoading}
+                    >
+                      <option value="">Pilih outlet...</option>
+                      {contactOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    {contactOptions.length === 0 && !contactLoading && (
+                      <p className="mt-1.5 text-[11px] text-rose-700">
+                        Tiada outlet ditemui. Jalankan migrasi{' '}
+                        <span className="font-mono">migrate-outlet-contact.sql</span>{' '}
+                        dalam Supabase SQL Editor.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className={labelClass} htmlFor="admin-outlet-address">
+                      Alamat outlet
+                    </label>
+                    <input
+                      id="admin-outlet-address"
+                      type="text"
+                      value={contactAddress}
+                      onChange={(event) => setContactAddress(event.target.value)}
+                      placeholder="No. 1, Jalan Contoh, 05000 Alor Setar, Kedah"
+                      className={fieldClass}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2 lg:col-span-1">
+                    <label className={labelClass} htmlFor="admin-outlet-phone">
+                      No. telefon
+                    </label>
+                    <input
+                      id="admin-outlet-phone"
+                      type="tel"
+                      value={contactPhone}
+                      onChange={(event) => setContactPhone(event.target.value)}
+                      placeholder="04-123 4567"
+                      className={fieldClass}
+                    />
+                  </div>
+                </div>
+
+                {(contactError || contactSuccess) && (
+                  <div
+                    className={`mx-5 mb-1 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs ${
+                      contactSuccess
+                        ? 'border-[#4f9d6e]/25 bg-[#eef8f1] font-semibold text-[#3f835b]'
+                        : 'border-rose-300/50 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    {contactSuccess ? (
+                      <Check className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <X className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <span>{contactSuccess || contactError}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 border-t border-line/15 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-[11px] leading-relaxed text-maroon-deep/50">
+                    Kosongkan kedua-dua medan dan simpan jika mahu memadam
+                    maklumat sedia ada.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleClearOutletContact}
+                      disabled={contactSaving}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-line/25 bg-[#fbf6ef] px-4 text-xs font-semibold text-maroon-deep/75 transition-colors hover:border-gold-deep/35 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RotateCcw className="size-3.5" />
+                      Kosongkan borang
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveOutletContact()}
+                      disabled={!contactOutlet || contactSaving || !isSupabaseConfigured}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-gold px-4 text-xs font-semibold text-maroon-deep transition-colors hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {contactSaving ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Save className="size-3.5" />
+                      )}
+                      {contactSaving ? 'Menyimpan...' : 'Simpan ke Supabase'}
+                    </button>
+                  </div>
+                </div>
               </section>
 
               <section className="gr-card-light p-5">
