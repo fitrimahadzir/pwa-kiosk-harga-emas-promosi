@@ -1,6 +1,7 @@
 import React from 'react';
 import { LogOut, Calculator, ShieldCheck, Users } from 'lucide-react';
 import { ShopSettings } from '../types/gold';
+import { useHideOnScrollDown } from '../hooks/useHideOnScrollDown';
 import { BrandLogo } from './BrandLogo';
 
 interface HeaderProps {
@@ -24,6 +25,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenStaff,
   showStaff = false,
 }) => {
+  const isHeaderHidden = useHideOnScrollDown();
+
   const staffButtonClass = `inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
     showStaff
       ? 'border-gold bg-gold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)]'
@@ -34,7 +37,9 @@ export const Header: React.FC<HeaderProps> = ({
     <>
       <header
         title={`${settings.shopName} • ${settings.branch} • ${settings.phone}`}
-        className="sticky top-0 z-30 border-b border-line/40 bg-maroon-deep pt-[env(safe-area-inset-top)] backdrop-blur-md"
+        className={`sticky top-0 z-30 border-b border-line/40 bg-maroon-deep pt-[env(safe-area-inset-top)] backdrop-blur-md transition-transform duration-300 ease-out will-change-transform ${
+          isHeaderHidden ? '-translate-y-full' : 'translate-y-0'
+        }`}
       >
         <div className="mx-auto flex min-h-16 w-full max-w-[1480px] flex-wrap items-center justify-between gap-2 px-4 py-2 sm:px-6 lg:px-8">
           {/* Brand identity */}
