@@ -52,7 +52,7 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { getAdminSession, signInAdmin, signOutAdmin, type AdminSession } from './lib/auth';
 import { supabase } from './lib/supabase';
-import { Calculator, Loader2 } from 'lucide-react';
+import { Gem, Loader2 } from 'lucide-react';
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
@@ -833,11 +833,11 @@ export default function App() {
       ) : (
         /* Main price board page */
         <main key="home-page" className="mx-auto grid w-full max-w-[1480px] flex-1 grid-cols-1 content-center items-stretch gap-4 px-4 py-5 sm:px-6 lg:gap-5 lg:px-8 lg:py-6 landscape:flex landscape:items-center landscape:gap-4 landscape:py-4 landscape:sm:gap-5 landscape:sm:py-5 landscape:lg:py-6">
-          {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Calculator launcher.
+          {/* LEFT COLUMN: Gold Prices Board + Promo Banner + Catalog launcher.
               In portrait these become direct grid items so the poster can sit
               between them, while landscape keeps the original side-by-side layout.
               In landscape the column's natural height (price board + 3:1 banner
-              + calculator) becomes the reference height for the promo poster. */}
+              + catalog launcher) becomes the reference height for the promo poster. */}
           <div
             ref={stageLeftRef}
             className="contents landscape:order-1 landscape:flex landscape:min-w-0 landscape:flex-1 landscape:flex-col landscape:justify-start landscape:gap-4 landscape:sm:gap-5"
@@ -852,7 +852,7 @@ export default function App() {
               />
             </div>
 
-            {/* Banner image: sits between the price board and calculator launcher.
+            {/* Banner image: sits between the price board and catalog launcher.
                 Ratio 3:1 (3750 × 1250 px). Uses the permanent artwork
                 banner-kekal.jpg; /images/banner-promosi.svg is kept only as the
                 original placeholder and is no longer displayed. */}
@@ -865,22 +865,22 @@ export default function App() {
               />
             </div>
 
-            {/* Compact launcher to the dedicated calculator page */}
+            {/* Compact launcher to the global jewelry catalog */}
             <button
               type="button"
-              onClick={openCalculator}
+              onClick={() => navigateTo('catalog')}
               className="order-4 w-full flex items-center justify-between gap-4 rounded-2xl bg-gold px-4 py-3.5 text-left text-maroon-deep border border-gold-deep/45 shadow-[0_16px_36px_-26px_rgba(212,161,58,0.75)] transition hover:bg-gold-soft active:scale-[0.99]"
             >
               <span className="flex items-center gap-3">
                 <span className="grid size-10 place-items-center rounded-xl bg-maroon-deep/10 border border-maroon-deep/20">
-                  <Calculator size={20} />
+                  <Gem size={20} />
                 </span>
                 <span>
                   <span className="block font-serif text-sm font-bold tracking-wide sm:text-base">
-                    Kalkulator Jualan
+                    Katalog Jewelry
                   </span>
                   <span className="block text-[11px] text-maroon-deep/70">
-                    Kira harga jual, upah tukang & trade-in emas lama
+                    Lihat koleksi jewelry & pilih reka bentuk tempahan
                   </span>
                 </span>
               </span>
@@ -891,10 +891,10 @@ export default function App() {
           </div>
 
           {/* RIGHT COLUMN: Promotional Posters Carousel & Highlights.
-              Portrait: appears between the price board and the calculator,
+              Portrait: appears between the price board and the catalog launcher,
               stretched to the full app width. Landscape: the poster keeps its
               3:4 ratio and its height is synced with the left column, so the
-              price board, banner and calculator always end at the same line. */}
+              price board, banner and catalog launcher always end at the same line. */}
           <div
             ref={stageRightRef}
             className="order-2 flex w-full flex-col items-center justify-between gap-3 landscape:order-2 landscape:w-auto landscape:flex-none landscape:items-stretch"
