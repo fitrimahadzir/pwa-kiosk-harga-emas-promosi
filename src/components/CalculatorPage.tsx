@@ -1,8 +1,8 @@
 import React from 'react';
 import { ArrowLeft, Calculator, Coins } from 'lucide-react';
 import { GoldPriceItem, GoldPurity, QuotationResult } from '../types/gold';
-import { formatMYR } from '../utils/calculator';
 import { SalesCalculator } from './SalesCalculator';
+import { GoldPriceBoard } from './GoldPriceBoard';
 
 interface CalculatorPageProps {
   prices: Record<GoldPurity, GoldPriceItem>;
@@ -13,8 +13,6 @@ interface CalculatorPageProps {
   /** Pakej promosi dari halaman poster (harga tetap dipratetap). */
   preset?: { title: string; price: number } | null;
 }
-
-const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
 export const CalculatorPage: React.FC<CalculatorPageProps> = ({
   prices,
@@ -80,49 +78,15 @@ export const CalculatorPage: React.FC<CalculatorPageProps> = ({
             Tekan gred untuk tukar kadar kiraan.
           </p>
 
-          <div className="mt-3 space-y-1.5">
-            {PURITIES.map((purity) => {
-              const item = prices[purity];
-              const isActive = selectedPurity === purity;
-
-              return (
-                <button
-                  key={purity}
-                  type="button"
-                  onClick={() => onPurityChange(purity)}
-                  className={`w-full rounded-xl border px-3 py-2 text-left transition active:scale-[0.98] ${
-                    isActive
-                      ? 'border-gold-deep/60 bg-gold text-maroon-deep shadow-[0_10px_24px_-16px_rgba(212,161,58,0.9)]'
-                      : 'border-line/20 bg-cream text-maroon-deep hover:border-gold-deep/40'
-                  }`}
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-serif text-lg font-black tracking-wide">
-                      {purity}
-                    </span>
-                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-maroon-deep text-gold">
-                      {item?.karat}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-baseline justify-between gap-2 text-[11px]">
-                    <span className={isActive ? 'text-maroon-deep/75' : 'text-maroon/55'}>
-                      Jual / gram
-                    </span>
-                    <span className="font-mono font-bold">
-                      {formatMYR(item?.sellPrice || 0)}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-2 text-[10px]">
-                    <span className={isActive ? 'text-maroon-deep/70' : 'text-maroon/50'}>
-                      Beli / gram
-                    </span>
-                    <span className={isActive ? 'font-mono text-maroon-deep/80' : 'font-mono text-maroon/60'}>
-                      {formatMYR(item?.buyPrice || 0)}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+          {/* Kotak ketulenan sama seperti di homepage — 3 butang mendatar,
+              kandungan berjajar kiri di dalam kotak. */}
+          <div className="mt-3">
+            <GoldPriceBoard
+              prices={prices}
+              selectedPurity={selectedPurity}
+              onSelectPurity={onPurityChange}
+              isCalculatorOpen
+            />
           </div>
 
           <p className="mt-3 border-t border-line/15 pt-2 text-[10px] leading-relaxed text-maroon/50">

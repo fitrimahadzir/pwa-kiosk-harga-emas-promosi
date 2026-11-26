@@ -14,6 +14,7 @@ import { GoldPriceItem, GoldPurity, QuotationResult } from '../types/gold';
 import { formatMYR, formatWeight } from '../utils/calculator';
 import type { ReceiptSaveResult } from '../utils/storage';
 import { SalesCalculator } from './SalesCalculator';
+import { GoldPriceBoard } from './GoldPriceBoard';
 
 interface Calculator2PageProps {
   prices: Record<GoldPurity, GoldPriceItem>;
@@ -28,8 +29,6 @@ interface Calculator2PageProps {
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
-
-const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
 const QuoteRow: React.FC<{
   label: string;
@@ -166,57 +165,15 @@ export const Calculator2Page: React.FC<Calculator2PageProps> = ({
               </span>
             </div>
 
-            <div className="relative mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-              {PURITIES.map((purity) => {
-                const item = prices[purity];
-                const isActive = selectedPurity === purity;
-
-                return (
-                  <button
-                    key={purity}
-                    type="button"
-                    onClick={() => onPurityChange(purity)}
-                    className={`relative overflow-hidden rounded-2xl border px-3 py-3 text-left transition active:scale-[0.98] ${
-                      isActive
-                        ? 'border-gold-deep bg-gradient-to-br from-gold to-gold-soft text-maroon-deep shadow-[0_16px_32px_-20px_rgba(212,161,58,0.95)]'
-                        : 'border-gold-deep/25 bg-cream text-maroon-deep hover:border-gold-deep/60 hover:bg-gold/5'
-                    }`}
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="font-heading text-2xl font-black tracking-wide">
-                        {purity}
-                      </span>
-                      <span
-                        className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold ${
-                          isActive
-                            ? 'bg-maroon-deep text-gold'
-                            : 'bg-maroon-deep/10 text-maroon/70'
-                        }`}
-                      >
-                        {item?.karat}
-                      </span>
-                    </div>
-                    <div className="mt-2 space-y-0.5">
-                      <div className="flex items-baseline justify-between gap-2 text-[11px]">
-                        <span className={isActive ? 'text-maroon-deep/75' : 'text-maroon/55'}>
-                          Jual / gram
-                        </span>
-                        <span className="font-mono font-bold">
-                          {formatMYR(item?.sellPrice || 0)}
-                        </span>
-                      </div>
-                      <div className="flex items-baseline justify-between gap-2 text-[10px]">
-                        <span className={isActive ? 'text-maroon-deep/65' : 'text-maroon/50'}>
-                          Beli / gram
-                        </span>
-                        <span className="font-mono">
-                          {formatMYR(item?.buyPrice || 0)}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+            {/* Guna semula kotak ketulenan dari homepage — susunan mendatar,
+                teks berjajar kiri di dalam kotak (bukan tertengah). */}
+            <div className="relative mt-4">
+              <GoldPriceBoard
+                prices={prices}
+                selectedPurity={selectedPurity}
+                onSelectPurity={onPurityChange}
+                isCalculatorOpen
+              />
             </div>
           </div>
 
