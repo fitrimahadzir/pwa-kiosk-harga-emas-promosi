@@ -1,4 +1,5 @@
 import {
+  CatalogItem,
   CounterAnnouncement,
   GoldPriceItem,
   GoldPurity,
@@ -310,6 +311,18 @@ type PromoRow = {
   package_price?: number | string | null;
 };
 
+/**
+ * Jadual lama / schema cache PostgREST yang belum ada kolum butiran pakej.
+ * Penerangan dan harga adalah tidak wajib, jadi poster tetap boleh disimpan.
+ */
+const isMissingPromoDetailsColumn = (error: {
+  code?: string;
+  message: string;
+}): boolean =>
+  error.code === '42703' ||
+  /could not find the '(title|description|package_price)' column/i.test(error.message) ||
+  /column .+(title|description|package_price)|does not exist/i.test(error.message);
+
 /** Baca semua poster promosi global dari server (sama untuk semua outlet). */
 export async function fetchPromos(): Promise<PromoItem[]> {
   if (!isSupabaseConfigured || !supabase) return [];
@@ -366,6 +379,13 @@ export async function pushPromos(promos: PromoItem[]): Promise<void> {
     package_price: Math.max(0, Number(promo.packagePrice) || 0),
     sort_order: index,
   }));
+  // Struktur jadual sebelum migrasi butiran pakej.
+  const legacyRows = promos.map((promo, index) => ({
+    id: promo.id,
+    image_url: promo.imageUrl,
+    is_active: promo.isActive,
+    sort_order: index,
+  }));
 
   if (rows.length > 0) {
     const { error } = await db
@@ -375,16 +395,29 @@ export async function pushPromos(promos: PromoItem[]): Promise<void> {
       const legacySchema =
         error.code === '42P10' ||
         /no unique or exclusion constraint/i.test(error.message);
-      const missingDetailsColumn =
-        error.code === '42703' ||
-        /column .+(title|description|package_price)|does not exist/i.test(error.message);
-      throw new Error(
-        legacySchema
-          ? 'Jadual kiosk_promos masih guna struktur lama. Sila jalankan supabase/migrate-global-promos.sql (atau schema.sql terkini) dalam Supabase SQL Editor.'
-          : missingDetailsColumn
-            ? 'Kolum butiran pakej belum wujud. Sila jalankan supabase/migrate-promo-details.sql dalam Supabase SQL Editor.'
-            : `Gagal menyimpan poster ke server: ${error.message}`,
-      );
+      if (legacySchema) {
+        throw new Error(
+          'Jadual kiosk_promos masih guna struktur lama. Sila jalankan supabase/migrate-global-promos.sql (atau schema.sql terkini) dalam Supabase SQL Editor.',
+        );
+      }
+
+      if (isMissingPromoDetailsColumn(error)) {
+        // Kolum butiran belum ada (atau cache PostgREST belum disegarkan).
+        // Poster tetap disimpan tanpa tajuk/penerangan/harga kerana ketiga-
+        // tiga butiran itu tidak wajib.
+        console.warn(
+          '[emaspos] Kolum butiran pakej tidak tersedia; poster disimpan tanpa butiran. Jalankan supabase/migrate-promo-details.sql untuk menyimpan tajuk/penerangan/harga.',
+          error.message,
+        );
+        const { error: legacyError } = await db
+          .from('kiosk_promos')
+          .upsert(legacyRows, { onConflict: 'id' });
+        if (legacyError) {
+          throw new Error(`Gagal menyimpan poster ke server: ${legacyError.message}`);
+        }
+      } else {
+        throw new Error(`Gagal menyimpan poster ke server: ${error.message}`);
+      }
     }
   }
 
@@ -445,6 +478,174 @@ export async function deletePromoImage(imageUrl: string): Promise<void> {
 
   const path = decodeURIComponent(imageUrl.slice(index + marker.length));
   await supabase.storage.from('promo-posters').remove([path]);
+}
+
+// ---------------------------------------------------------------------------
+// Katalog jewelry (global — sama untuk semua outlet)
+// ---------------------------------------------------------------------------
+
+type CatalogRow = {
+  id?: string | null;
+  name?: string | null;
+  category?: string | null;
+  description?: string | null;
+  price?: number | string | null;
+  image_url?: string | null;
+  is_active?: boolean | null;
+};
+
+const CATALOG_COLUMNS =
+  'id, name, category, description, price, image_url, is_active';
+
+const CATALOG_SETUP_MESSAGE =
+  'Jadual katalog belum ada di Supabase. Jalankan supabase/migrate-jewelry-catalog.sql dalam Supabase SQL Editor dahulu.';
+
+function isMissingCatalogTableError(error: { code?: string; message: string }): boolean {
+  return (
+    error.code === '42P01' ||
+    error.code === 'PGRST205' ||
+    /relation .*kiosk_catalog_items.* does not exist/i.test(error.message) ||
+    /could not find the table/i.test(error.message)
+  );
+}
+
+function isMissingCatalogColumnError(error: { code?: string; message: string }): boolean {
+  return (
+    error.code === '42703' ||
+    error.code === 'PGRST204' ||
+    /could not find the '(name|category|description|price|image_url|is_active|sort_order)' column/i.test(
+      error.message,
+    )
+  );
+}
+
+/** Baca semua produk katalog global dari server. */
+export async function fetchCatalogItems(): Promise<CatalogItem[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase
+    .from('kiosk_catalog_items')
+    .select(CATALOG_COLUMNS)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingCatalogTableError(error) || isMissingCatalogColumnError(error)) {
+      console.warn('[emaspos]', CATALOG_SETUP_MESSAGE);
+      return [];
+    }
+    console.warn('[emaspos] Gagal membaca katalog jewelry:', error.message);
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+
+  return (data as CatalogRow[]).map((row, index) => ({
+    id: String(row.id ?? `catalog-${index}`),
+    name: String(row.name ?? '').trim(),
+    category: String(row.category ?? '').trim(),
+    description: String(row.description ?? '').trim(),
+    price: Math.max(0, Number(row.price) || 0),
+    imageUrl: String(row.image_url ?? '').trim(),
+    isActive: row.is_active !== false,
+  }));
+}
+
+/**
+ * Ganti senarai katalog global di server (admin sahaja).
+ * Susunan array menentukan `sort_order` paparan di kiosk.
+ */
+export async function pushCatalogItems(items: CatalogItem[]): Promise<void> {
+  const db = requireClient();
+
+  const rows = items.map((item, index) => ({
+    id: item.id,
+    name: item.name.trim(),
+    category: item.category.trim(),
+    description: item.description.trim(),
+    price: Math.max(0, Number(item.price) || 0),
+    image_url: item.imageUrl.trim(),
+    is_active: item.isActive,
+    sort_order: index,
+  }));
+
+  if (rows.length > 0) {
+    const { error } = await db
+      .from('kiosk_catalog_items')
+      .upsert(rows, { onConflict: 'id' });
+
+    if (error) {
+      if (isMissingCatalogTableError(error) || isMissingCatalogColumnError(error)) {
+        throw new Error(CATALOG_SETUP_MESSAGE);
+      }
+      throw new Error(`Gagal menyimpan katalog ke server: ${error.message}`);
+    }
+  }
+
+  // Buang produk yang dipadam dari senarai (sama seperti poster promosi).
+  const { data: existing, error: existingError } = await db
+    .from('kiosk_catalog_items')
+    .select('id');
+
+  if (existingError) {
+    throw new Error(`Gagal menyemak katalog sedia ada: ${existingError.message}`);
+  }
+
+  const keep = new Set(items.map((item) => item.id));
+  const removeIds = (existing ?? [])
+    .map((row) => (row as { id?: string }).id)
+    .filter((id): id is string => typeof id === 'string' && !keep.has(id));
+
+  if (removeIds.length > 0) {
+    const { error } = await db
+      .from('kiosk_catalog_items')
+      .delete()
+      .in('id', removeIds);
+    if (error) {
+      throw new Error(`Gagal memadam produk lama: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * Muat naik gambar produk ke bucket `jewelry-catalog` dan pulangkan URL awam.
+ * Hanya admin yang boleh menulis (polisi RLS Storage).
+ */
+export async function uploadCatalogImage(blob: Blob): Promise<string> {
+  const db = requireClient();
+
+  const extension =
+    blob.type === 'image/webp' ? 'webp' : blob.type === 'image/png' ? 'png' : 'jpg';
+  const path = `products/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+
+  const { error } = await db.storage.from('jewelry-catalog').upload(path, blob, {
+    contentType: blob.type || 'image/jpeg',
+    cacheControl: '31536000',
+    upsert: false,
+  });
+
+  if (error) {
+    const message =
+      /bucket.*not found|bucket does not exist/i.test(error.message) ||
+      String(error.statusCode ?? '') === '404'
+        ? `Bucket 'jewelry-catalog' belum ada. Jalankan supabase/migrate-jewelry-catalog.sql dalam Supabase SQL Editor.`
+        : `Gagal memuat naik gambar produk: ${error.message}`;
+    throw new Error(message);
+  }
+
+  const { data } = db.storage.from('jewelry-catalog').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/** Padam gambar produk dari Storage (jika URL milik bucket kita). */
+export async function deleteCatalogImage(imageUrl: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || !imageUrl) return;
+
+  const marker = '/storage/v1/object/public/jewelry-catalog/';
+  const index = imageUrl.indexOf(marker);
+  if (index === -1) return;
+
+  const path = decodeURIComponent(imageUrl.slice(index + marker.length));
+  await supabase.storage.from('jewelry-catalog').remove([path]);
 }
 
 // ---------------------------------------------------------------------------
@@ -924,6 +1125,14 @@ export function subscribeToOutletChanges(
       { event: '*', schema: 'public', table: 'kiosk_promos' },
       () => {
         // Poster adalah global — sebarang perubahan relevan untuk semua outlet.
+        onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kiosk_catalog_items' },
+      () => {
+        // Katalog adalah global — sebarang perubahan relevan untuk semua outlet.
         onChange();
       },
     )

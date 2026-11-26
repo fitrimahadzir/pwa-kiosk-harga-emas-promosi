@@ -23,6 +23,22 @@ export interface PromoItem {
   packagePrice: number;
 }
 
+/**
+ * Satu item dalam katalog jewelry global. Gambar disimpan di Supabase Storage
+ * (`jewelry-catalog`); `imageUrl` ialah URL awamnya.
+ */
+export interface CatalogItem {
+  id: string;
+  name: string;
+  /** Kategori/koleksi (contoh: Cincin, Rantai, Gelang). Kosong = tanpa kategori. */
+  category: string;
+  description: string;
+  /** Harga rujukan dalam RM. 0 bermaksud harga tidak dipaparkan. */
+  price: number;
+  imageUrl: string;
+  isActive: boolean;
+}
+
 export interface PriceHistoryEntry {
   id: string;
   timestamp: string;

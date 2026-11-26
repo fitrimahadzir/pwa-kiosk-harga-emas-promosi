@@ -19,3 +19,7 @@ alter table public.kiosk_promos
 comment on column public.kiosk_promos.title is 'Tajuk pakej promosi';
 comment on column public.kiosk_promos.description is 'Penerangan pakej promosi';
 comment on column public.kiosk_promos.package_price is 'Harga pakej dalam RM (0 = tiada harga)';
+
+-- Beritahu PostgREST supaya memuat semula schema cache. Tanpa ini, API masih
+-- boleh balas "Could not find the 'description' column ... in the schema cache".
+notify pgrst, 'reload schema';

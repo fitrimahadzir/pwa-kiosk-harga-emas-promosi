@@ -28,9 +28,11 @@ import {
   ChevronUp,
   ChevronDown,
   FileText,
+  Gem,
   type LucideIcon,
 } from 'lucide-react';
 import {
+  CatalogItem,
   GoldPriceItem,
   GoldPurity,
   PromoItem,
@@ -54,6 +56,7 @@ import { isSupabaseConfigured, supabase, supabaseConfig } from '../lib/supabase'
 import { isStandalonePwa } from '../utils/device';
 import { AnnouncementTicker } from './AnnouncementTicker';
 import { ReceiptReport } from './ReceiptReport';
+import { CatalogAdmin } from './CatalogAdmin';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -70,6 +73,9 @@ interface AdminModalProps {
   ) => Promise<void>;
   promos: PromoItem[];
   onUpdatePromos: (newPromos: PromoItem[]) => Promise<void>;
+  /** Katalog jewelry global (sama untuk semua outlet). */
+  catalogItems: CatalogItem[];
+  onUpdateCatalogItems: (items: CatalogItem[]) => Promise<void>;
   /** Teks pengumuman kaunter global (semua outlet). */
   announcement: string;
   onUpdateAnnouncement: (message: string) => Promise<void>;
@@ -83,7 +89,14 @@ interface AdminModalProps {
   onResetDefaults: () => Promise<void>;
 }
 
-type AdminTab = 'prices' | 'promos' | 'announcement' | 'history' | 'reports' | 'settings';
+type AdminTab =
+  | 'prices'
+  | 'promos'
+  | 'catalog'
+  | 'announcement'
+  | 'history'
+  | 'reports'
+  | 'settings';
 
 const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
@@ -135,6 +148,7 @@ function formatKemaskiniTerakhir(iso: string | null): string {
 const NAV_ITEMS: { id: AdminTab; label: string; icon: LucideIcon }[] = [
   { id: 'prices', label: 'Harga', icon: Coins },
   { id: 'promos', label: 'Promosi', icon: ImageIcon },
+  { id: 'catalog', label: 'Katalog', icon: Gem },
   { id: 'announcement', label: 'Pengumuman', icon: Megaphone },
   { id: 'history', label: 'Sejarah', icon: History },
   { id: 'reports', label: 'Laporan', icon: FileText },
@@ -153,6 +167,12 @@ const PAGE_COPY: Record<AdminTab, { kicker: string; title: string; description: 
     title: 'Poster Promosi',
     description:
       'Muat naik gambar poster sahaja — ia dipaparkan secara bergilir di skrin tablet kaunter.',
+  },
+  catalog: {
+    kicker: 'Tempahan',
+    title: 'Katalog Jewelry',
+    description:
+      'Tambah satu produk atau muat naik berbilang gambar sekali — semua gambar disimpan di bucket Supabase.',
   },
   announcement: {
     kicker: 'Paparan Kaunter',
@@ -296,6 +316,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onUpdateAllPrices,
   promos,
   onUpdatePromos,
+  catalogItems,
+  onUpdateCatalogItems,
   announcement,
   onUpdateAnnouncement,
   onUpdateOutletContact,
@@ -941,7 +963,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       const id = newPromo.id ?? `promo-${Date.now()}`;
 
       // Gambar disimpan ke Storage sekarang, tetapi rekod poster hanya
-      // disimpan selepas admin mengisi tajuk / penerangan / harga pakej.
+      // disimpan selepas admin menekan "Simpan Poster". Tajuk, penerangan dan
+      // harga pakej adalah pilihan.
       if (promoStagedImageUrl && promoStagedImageUrl !== imageUrl) {
         void deletePromoImage(promoStagedImageUrl).catch(() => {});
       }
@@ -1640,8 +1663,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
 
                     <p className="rounded-lg bg-white/60 px-3 py-2 text-[11px] leading-relaxed text-maroon-deep/60">
-                      Muat naik gambar kemudian isi tajuk, penerangan dan harga pakej. Butiran ini
-                      dipaparkan pada halaman poster dan digunakan oleh butang Beli Pantas.
+                      Muat naik gambar poster sahaja. Tajuk, penerangan dan harga pakej adalah
+                      tidak wajib — kosongkan jika tiada butiran. Butiran yang diisi dipaparkan
+                      pada halaman poster dan digunakan oleh butang Beli Pantas.
                     </p>
 
                     <div>
@@ -1742,7 +1766,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                       <label className="block">
                         <span className="mb-1 block text-[11px] font-semibold text-maroon/70">
-                          Penerangan
+                          Penerangan (tidak wajib)
                         </span>
                         <textarea
                           rows={3}
@@ -1757,7 +1781,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                       <label className="block">
                         <span className="mb-1 block text-[11px] font-semibold text-maroon/70">
-                          Harga pakej (RM)
+                          Harga pakej (RM) — tidak wajib
                         </span>
                         <input
                           type="number"
@@ -1770,7 +1794,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           className="h-10 w-full rounded-lg border border-line/25 bg-[#fffdf9] px-3 text-xs text-maroon-deep placeholder:text-maroon-deep/35 focus:border-gold-deep focus:outline-none"
                         />
                         <span className="mt-1 block text-[10px] leading-relaxed text-maroon-deep/50">
-                          Harga ini dipratetap dalam kalkulator bila butang Beli Pantas ditekan.
+                          Kosongkan jika tiada harga. Jika diisi, harga ini dipratetap dalam
+                          kalkulator bila butang Beli Pantas ditekan.
                         </span>
                       </label>
                     </div>
@@ -1893,6 +1918,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 )}
               </div>
             </section>
+          )}
+
+          {activeTab === 'catalog' && (
+            <CatalogAdmin items={catalogItems} onUpdateItems={onUpdateCatalogItems} />
           )}
 
           {activeTab === 'announcement' && (

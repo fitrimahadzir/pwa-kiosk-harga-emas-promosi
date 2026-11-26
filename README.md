@@ -34,6 +34,7 @@ Aplikasi ini berasaskan **React 19**, **Tailwind CSS v4**, dan **Supabase** (bac
 | 📊 **Papan Harga Emas** | Paparan harga semasa untuk 999, 916, dan 375 dalam bentuk kad yang menarik |
 | 🧮 **Kalkulator Jualan** | Kira harga jual, upah tukang, dan nilai trade-in emas lama |
 | 🎠 **Promo Slaid** | Paparan slaid promosi dengan imej menarik untuk kegunaan kaunter |
+| 💍 **Katalog Jewelry** | Katalog tempahan global dengan carian & penapis kategori (`#/katalog`); 40+ produk dipaparkan dalam grid |
 | 🔐 **Akses Pentadbir** | Log masuk admin melalui Supabase Auth (e-mel + kata laluan); kiosk hanya membaca data |
 | 📱 **Progressive Web App** | Berfungsi sebagai aplikasi asli di peranti, sokongan offline |
 | 🔄 **Real-time Sync** | Sync harga & promosi merentas tab pengguna menggunakan BroadcastChannel |
@@ -142,9 +143,12 @@ GEMINI_API_KEY="your_gemini_api_key_here"
    - mengaktifkan RLS pada semua jadual `kiosk_*`;
    - membuang **semua** INSERT/UPDATE/DELETE untuk `anon` (kiosk tidak boleh menulis);
    - membenarkan tulis hanya untuk pengguna yang tersenarai dalam `public.kiosk_admins`.
-   - menambah jadual `kiosk_announcement` untuk pengumuman kaunter global.
+   - menambah jadual `kiosk_announcement` untuk pengumuman kaunter global;
+   - menambah jadual `kiosk_catalog_items` dan bucket Storage `jewelry-catalog`.
    Jika pangkalan data sudah wujud sebelum ciri pengumuman, jalankan juga
    `supabase/migrate-announcement.sql` (selamat dijalankan berulang kali).
+   Untuk pangkalan sedia ada yang belum ada katalog, jalankan
+   `supabase/migrate-jewelry-catalog.sql` dalam SQL Editor (idempotent).
 2. **Authentication → Users → Add user** — cipta akaun admin (e-mel + kata laluan).
 3. Daftarkan akaun itu sebagai pentadbir:
 
@@ -192,6 +196,11 @@ npm run lint
 3. Pilih outlet dan kemas kini harga emas (999, 916, 375).
 4. Klik **Simpan harga** — penulisan disahkan oleh RLS di server; kegagalan akan dipaparkan, bukan didiamkan.
 5. Buka tab **Pengumuman** (di bawah Promosi) untuk mengurus teks marquee yang berjalan di footer kiosk. Klik **Tambah teks** untuk memasukkan beberapa pengumuman — setiap satu dipaparkan bergilir. Teks disimpan secara global dalam `kiosk_announcement.message` (satu baris = satu entri) dan disegerakkan ke semua tablet outlet.
+6. Buka tab **Katalog** untuk mengurus katalog jewelry global:
+   - **Tambah Produk** — satu gambar + nama, kategori, penerangan, harga rujukan;
+   - **Berbilang Gambar Sekali** — pilih 40+ fail; setiap gambar menjadi satu produk dengan nama dari nama fail, kemudian edit butirannya dalam senarai;
+   - gambar dimuat naik ke bucket Supabase **jewelry-catalog** (awam untuk dibaca, admin sahaja untuk menulis).
+7. Di kiosk, klik pautan **Katalog** di header (atau buka `#/katalog`). Cari produk, pilih kategori, kemudian klik kad untuk melihat detail. Butang tempahan akan ditambah kemudian — staf mengambil butiran pembeli secara manual buat masa ini.
 
 ---
 
@@ -203,6 +212,7 @@ npm run lint
 | Log masuk admin ditolak | Pastikan pengguna Auth didaftarkan dalam `public.kiosk_admins` (`is_active = true`) |
 | "Gagal menyimpan harga ke server" | Sesi admin tamat atau RLS menolak — log masuk semula dan jalankan `supabase/schema.sql` |
 | Gagal simpan pengumuman / jadual tiada | Jalankan `supabase/migrate-announcement.sql` dalam Supabase SQL Editor |
+| "Bucket 'jewelry-catalog' belum ada" / katalog kosong | Jalankan `supabase/migrate-jewelry-catalog.sql` dalam Supabase SQL Editor |
 | Font tidak muncul | Pastikan fail font berada di `public/font/The Seasons/` |
 | PWA tidak boleh dipasang | Pastikan HTTPS aktif atau gunakan localhost |
 

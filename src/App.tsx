@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  CatalogItem,
   GoldPriceItem,
   GoldPurity,
   PromoItem,
@@ -21,6 +22,8 @@ import {
   pushOutletPrices,
   fetchPromos,
   pushPromos,
+  fetchCatalogItems,
+  pushCatalogItems,
   fetchOutletSettings,
   pushOutletSettings,
   fetchAnnouncement,
@@ -38,6 +41,7 @@ import { AnnouncementTicker } from './components/AnnouncementTicker';
 import { PromoCarousel } from './components/PromoCarousel';
 import { PromoDetailPage } from './components/PromoDetailPage';
 import { StaffPage } from './components/StaffPage';
+import { CatalogPage } from './components/CatalogPage';
 import { DEMO_STAFF_PERFORMANCE } from './data/staffPerformance';
 import { QuotationModal } from './components/QuotationModal';
 import { AdminModal } from './components/AdminModal';
@@ -54,7 +58,7 @@ const PURITIES: GoldPurity[] = ['999', '916', '375'];
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-type Page = 'home' | 'calculator' | 'calculator-alt' | 'promo' | 'staff';
+type Page = 'home' | 'calculator' | 'calculator-alt' | 'promo' | 'staff' | 'catalog';
 
 type Route = {
   admin: boolean;
@@ -74,6 +78,10 @@ function parseHash(): Route {
   if (key === 'kalkulator') return { admin: false, page: 'calculator', promoId: null };
   if (key === 'kalkulator2') return { admin: false, page: 'calculator-alt', promoId: null };
   if (key === 'staff') return { admin: false, page: 'staff', promoId: null };
+  // `#/katalog` (dan alias Inggeris) membuka katalog tempahan jewelry.
+  if (key === 'katalog' || key === 'catalog') {
+    return { admin: false, page: 'catalog', promoId: null };
+  }
   if (key === 'promo' && rest.length > 0) {
     return {
       admin: false,
@@ -111,6 +119,7 @@ export default function App() {
   );
   const [prices, setPrices] = useState<Record<GoldPurity, GoldPriceItem>>(DEFAULT_PRICES);
   const [promos, setPromos] = useState<PromoItem[]>([]);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [settings, setSettings] = useState<ShopSettings>(DEFAULT_SETTINGS);
   const [announcement, setAnnouncement] = useState<string>(DEFAULT_ANNOUNCEMENT);
   const [history, setHistory] = useState<PriceHistoryEntry[]>([]);
@@ -177,9 +186,11 @@ export default function App() {
           ? '/kalkulator2'
           : nextPage === 'staff'
             ? '/staff'
-            : nextPromoId
-              ? `/promo/${encodeURIComponent(nextPromoId)}`
-              : '/';
+            : nextPage === 'catalog'
+              ? '/katalog'
+              : nextPromoId
+                ? `/promo/${encodeURIComponent(nextPromoId)}`
+                : '/';
     // Sesi kalkulator baru sentiasa bermula dengan gred lalai 916.
     // Input lain (berat, upah, diskaun, trade-in) dikosongkan oleh SalesCalculator.
     if (nextPage === 'calculator' || nextPage === 'calculator-alt') {
@@ -350,13 +361,16 @@ export default function App() {
     const outletName = currentOutletName;
     if (!outletName) return;
 
-    const [remotePromos, remoteSettings, remoteAnnouncement] = await Promise.all([
-      fetchPromos(),
-      fetchOutletSettings(outletName),
-      fetchAnnouncement(),
-    ]);
+    const [remotePromos, remoteCatalog, remoteSettings, remoteAnnouncement] =
+      await Promise.all([
+        fetchPromos(),
+        fetchCatalogItems(),
+        fetchOutletSettings(outletName),
+        fetchAnnouncement(),
+      ]);
 
     setPromos(remotePromos);
+    setCatalogItems(remoteCatalog);
     setSettings(remoteSettings);
     setAnnouncement(remoteAnnouncement.message);
   }, [currentOutletName]);
@@ -594,6 +608,16 @@ export default function App() {
     setPromos(await fetchPromos());
   };
 
+  /** Katalog jewelry global. Gambar sudah berada di bucket Supabase Storage. */
+  const handleUpdateCatalogItems = async (newItems: CatalogItem[]): Promise<void> => {
+    if (!adminSession) {
+      throw new Error('Sesi admin tidak sah. Sila log masuk semula.');
+    }
+
+    await pushCatalogItems(newItems);
+    setCatalogItems(await fetchCatalogItems());
+  };
+
   // Pengumuman kaunter adalah global (satu teks untuk semua outlet) di Supabase.
   const handleUpdateAnnouncement = async (message: string): Promise<void> => {
     if (!adminSession) {
@@ -700,6 +724,8 @@ export default function App() {
           onUpdateAllPrices={handleUpdateAllPrices}
           promos={promos}
           onUpdatePromos={handleUpdatePromos}
+          catalogItems={catalogItems}
+          onUpdateCatalogItems={handleUpdateCatalogItems}
           announcement={announcement}
           onUpdateAnnouncement={handleUpdateAnnouncement}
           onUpdateOutletContact={handleUpdateOutletContact}
@@ -745,6 +771,8 @@ export default function App() {
         }
         showStaff={page === 'staff'}
         onOpenStaff={() => navigateTo('staff')}
+        showCatalog={page === 'catalog'}
+        onOpenCatalog={() => navigateTo('catalog')}
       />
 
       {/* 2. MAIN CONTENT */}
@@ -789,6 +817,16 @@ export default function App() {
         <main key="staff-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           <StaffPage
             performance={DEMO_STAFF_PERFORMANCE}
+            onBack={() => navigateTo('home')}
+          />
+        </main>
+      ) : page === 'catalog' ? (
+        /* Katalog tempahan jewelry (global) */
+        <main key="catalog-page" className="mx-auto w-full max-w-[1480px] flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          <CatalogPage
+            items={catalogItems}
+            shopName={settings.shopName}
+            outletName={currentOutletName}
             onBack={() => navigateTo('home')}
           />
         </main>

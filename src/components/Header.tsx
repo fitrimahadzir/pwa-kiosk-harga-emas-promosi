@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LogOut, Calculator, ShieldCheck, Users, Menu, X } from 'lucide-react';
+import { LogOut, Calculator, ShieldCheck, Users, Menu, X, Gem } from 'lucide-react';
 import { ShopSettings } from '../types/gold';
 import { useHideOnScrollDown } from '../hooks/useHideOnScrollDown';
 import { useIsTablet } from '../hooks/useIsTablet';
@@ -15,6 +15,9 @@ interface HeaderProps {
   /** Buka halaman prestasi staff (butang menggantikan widget jam lama). */
   onOpenStaff?: () => void;
   showStaff?: boolean;
+  /** Pautan ke katalog tempahan jewelry (`#/katalog`). */
+  onOpenCatalog?: () => void;
+  showCatalog?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +28,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleCalculator,
   onOpenStaff,
   showStaff = false,
+  onOpenCatalog,
+  showCatalog = false,
 }) => {
   const isScrollHidden = useHideOnScrollDown();
   const isTablet = useIsTablet();
@@ -50,11 +55,14 @@ export const Header: React.FC<HeaderProps> = ({
 
   const closeTabletMenu = () => setIsTabletMenuOpen(false);
 
-  const staffButtonClass = `inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
-    showStaff
-      ? 'border-gold bg-gold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)]'
-      : 'border-gold/40 bg-transparent text-gold-soft hover:border-gold/60 hover:bg-gold/10 hover:text-gold'
-  }`;
+  const navButtonClass = (isActive: boolean) =>
+    `inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
+      isActive
+        ? 'border-gold bg-gold text-maroon-deep shadow-[0_12px_30px_-16px_rgba(212,161,58,0.9)]'
+        : 'border-gold/40 bg-transparent text-gold-soft hover:border-gold/60 hover:bg-gold/10 hover:text-gold'
+    }`;
+
+  const staffButtonClass = navButtonClass(showStaff);
 
   return (
     <>
@@ -93,6 +101,23 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Controls — Staff button replaces the old clock/timer widget,
               sitting immediately to the left of the calculator button. */}
           <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+            {/* Katalog jewelry — pautan terus ke #/katalog */}
+            {onOpenCatalog && (
+              <a
+                href="#/katalog"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onOpenCatalog();
+                  closeTabletMenu();
+                }}
+                className={navButtonClass(showCatalog)}
+                title="Buka Katalog Jewelry"
+              >
+                <Gem size={15} />
+                <span className="hidden sm:inline">Katalog</span>
+              </a>
+            )}
+
             {onOpenStaff && (
               <button
                 onClick={() => {
