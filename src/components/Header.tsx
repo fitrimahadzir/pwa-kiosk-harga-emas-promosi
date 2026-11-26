@@ -236,9 +236,9 @@ export const Header: React.FC<HeaderProps> = ({
                 onLogout();
                 closeMenu();
               }}
-              className={`inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold ${mobileButtonClass} ${
+              className={`inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold ${
                 isPhone
-                  ? 'justify-start border-rose-400/45 bg-rose-500/10 text-rose-300 hover:border-rose-400/70 hover:bg-rose-500/20 hover:text-rose-200'
+                  ? 'ml-auto w-auto border-rose-400/45 bg-rose-500/10 px-3 text-rose-300 hover:border-rose-400/70 hover:bg-rose-500/20 hover:text-rose-200'
                   : ''
               }`}
               title="Tukar outlet"
