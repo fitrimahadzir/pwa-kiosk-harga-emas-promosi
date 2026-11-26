@@ -3,9 +3,9 @@ import { useDeviceOrientation } from '../hooks/useDeviceOrientation';
 import { TabletOrientationNotice } from './TabletOrientationNotice';
 
 /**
- * Root-level orientation guard. It is intentionally mounted outside `App` so
- * every screen (outlet picker, kiosk, admin login and admin modal) shares the
- * same tablet rotation policy without duplicating logic in each render branch.
+ * Root-level orientation unlocker. Mounted outside `App` so every screen
+ * (outlet picker, kiosk, admin login and admin modal) releases any stale
+ * orientation lock. Rotation is now ALLOWED on tablets — no rotate notice.
  */
 export function TabletOrientationGuard() {
   const {

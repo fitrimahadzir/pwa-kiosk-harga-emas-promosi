@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  getDeviceProfile,
-  type DeviceProfile,
-} from '../utils/device';
+import { useEffect, useState } from 'react';
 
 export type DeviceOrientation = 'portrait' | 'landscape';
 
+/**
+ * Kekal dieksport untuk keserasian komponen lama. Kini tiada kunci orientasi
+ * dipaksa — semua peranti, termasuk tablet, dibenarkan berputar.
+ */
 export type OrientationLockStatus =
   | 'checking'
   | 'pending'
@@ -13,24 +13,6 @@ export type OrientationLockStatus =
   | 'unsupported'
   | 'failed'
   | 'not-applicable';
-
-interface ScreenOrientationWithLock {
-  lock?: (orientation: string) => Promise<void>;
-  unlock?: () => void;
-}
-
-interface LegacyScreenOrientation {
-  lockOrientation?: (orientation: string) => boolean;
-  mozLockOrientation?: (orientation: string) => boolean;
-  msLockOrientation?: (orientation: string) => boolean;
-  unlockOrientation?: () => void;
-  mozUnlockOrientation?: () => void;
-  msUnlockOrientation?: () => void;
-}
-
-interface LockAttemptResult {
-  status: 'locked' | 'unsupported' | 'failed';
-}
 
 function readOrientation(): DeviceOrientation {
   if (typeof window === 'undefined') return 'landscape';
@@ -51,77 +33,35 @@ function readOrientation(): DeviceOrientation {
     : 'landscape';
 }
 
-function getNativeOrientationApi(): ScreenOrientationWithLock | undefined {
-  if (typeof window === 'undefined') return undefined;
-  return window.screen?.orientation as unknown as
-    | ScreenOrientationWithLock
-    | undefined;
-}
-
-function getLegacyOrientationApi(): LegacyScreenOrientation | undefined {
-  if (typeof window === 'undefined') return undefined;
-  return window.screen as unknown as LegacyScreenOrientation | undefined;
-}
-
-function getLegacyLock(): ((orientation: string) => boolean) | undefined {
-  const legacy = getLegacyOrientationApi();
-  return legacy?.lockOrientation ?? legacy?.mozLockOrientation ?? legacy?.msLockOrientation;
-}
-
-function getLegacyUnlock(): (() => void) | undefined {
-  const legacy = getLegacyOrientationApi();
-  return (
-    legacy?.unlockOrientation ??
-    legacy?.mozUnlockOrientation ??
-    legacy?.msUnlockOrientation
-  );
-}
-
-export function canLockOrientation(): boolean {
-  if (typeof window === 'undefined') return false;
-  return (
-    typeof getNativeOrientationApi()?.lock === 'function' ||
-    typeof getLegacyLock() === 'function'
-  );
-}
-
-async function attemptLandscapeLock(): Promise<LockAttemptResult> {
-  const nativeApi = getNativeOrientationApi();
-
-  if (nativeApi && typeof nativeApi.lock === 'function') {
-    try {
-      await nativeApi.lock('landscape');
-      return { status: 'locked' };
-    } catch {
-      // Includes SecurityError (not installed/fullscreen) and NotSupportedError.
-      return { status: 'failed' };
-    }
-  }
-
-  const legacyLock = getLegacyLock();
-  if (legacyLock) {
-    try {
-      const locked = legacyLock.call(window.screen, 'landscape');
-      return { status: locked === false ? 'failed' : 'locked' };
-    } catch {
-      return { status: 'failed' };
-    }
-  }
-
-  return { status: 'unsupported' };
-}
-
+/**
+ * Lepaskan sebarang kunci orientasi lama (daripada manifest lama, fullscreen,
+ * atau sesi sebelumnya) supaya peranti benar-benar bebas berputar.
+ */
 function unlockOrientation(): void {
-  const nativeApi = getNativeOrientationApi();
+  if (typeof window === 'undefined') return;
+
+  const nativeApi = window.screen?.orientation as
+    | { unlock?: () => void }
+    | undefined;
   if (nativeApi && typeof nativeApi.unlock === 'function') {
     try {
       nativeApi.unlock();
     } catch {
-      // No-op: the browser may already be unlocked or restricted by the OS.
+      // Pelayar mungkin tidak membenarkan unlock di luar standalone/fullscreen.
     }
   }
 
-  const legacyUnlock = getLegacyUnlock();
+  const legacy = window.screen as unknown as
+    | {
+        unlockOrientation?: () => void;
+        mozUnlockOrientation?: () => void;
+        msUnlockOrientation?: () => void;
+      }
+    | undefined;
+  const legacyUnlock =
+    legacy?.unlockOrientation ??
+    legacy?.mozUnlockOrientation ??
+    legacy?.msUnlockOrientation;
   if (legacyUnlock) {
     try {
       legacyUnlock.call(window.screen);
@@ -131,36 +71,21 @@ function unlockOrientation(): void {
   }
 }
 
-function isDocumentFullscreen(): boolean {
-  return (
-    typeof document !== 'undefined' && Boolean(document.fullscreenElement)
-  );
-}
-
 /**
- * Tablet-only orientation management.
+ * Rotation dibenarkan pada semua peranti termasuk tablet.
  *
- * - Tablets: attempts `screen.orientation.lock('landscape')` when the installed
- *   PWA launches (or when it enters fullscreen). Failures are reported, never
- *   thrown, and the caller can show a manual rotate instruction.
- * - Phones: never locks landscape. If the manifest launches an installed phone
- *   PWA in landscape, we release the orientation so the phone can stay portrait.
- * - Desktops: untouched.
+ * Hook ini hanya:
+ *  - memantau orientasi semasa (untuk keperluan layout responsif);
+ *  - melepaskan kunci orientasi lama semasa boot / install / fullscreen.
+ *
+ * Tiada lagi `screen.orientation.lock('landscape')` dan tiada skrin arahan
+ * "Sila putarkan peranti ke landskap".
  */
 export function useDeviceOrientation() {
-  const [profile, setProfile] = useState<DeviceProfile>(() => getDeviceProfile());
   const [orientation, setOrientation] = useState<DeviceOrientation>(() =>
     readOrientation(),
   );
-  const [lockStatus, setLockStatus] = useState<OrientationLockStatus>(() => {
-    if (typeof window === 'undefined') return 'not-applicable';
-    return getDeviceProfile().type === 'tablet' ? 'checking' : 'not-applicable';
-  });
 
-  const mountedRef = useRef(true);
-  const attemptIdRef = useRef(0);
-
-  // Keep orientation state in sync across both API and legacy events.
   useEffect(() => {
     const update = () => setOrientation(readOrientation());
     const orientationApi = window.screen?.orientation;
@@ -185,125 +110,23 @@ export function useDeviceOrientation() {
     };
   }, []);
 
-  const requestLock = useCallback(async (manual = false): Promise<boolean> => {
-    const latestProfile = getDeviceProfile();
-    setProfile(latestProfile);
-
-    if (latestProfile.type !== 'tablet') {
-      setLockStatus('not-applicable');
-      return false;
-    }
-
-    const canAttempt =
-      manual ||
-      latestProfile.isInstalledPwa ||
-      isDocumentFullscreen();
-
-    if (!canAttempt) {
-      setLockStatus('unsupported');
-      return false;
-    }
-
-    const attemptId = attemptIdRef.current + 1;
-    attemptIdRef.current = attemptId;
-    setLockStatus('pending');
-
-    const result = await attemptLandscapeLock();
-
-    // Ignore stale results after unmount or a newer lock attempt.
-    if (!mountedRef.current || attemptId !== attemptIdRef.current) {
-      return result.status === 'locked';
-    }
-
-    setLockStatus(result.status);
-    return result.status === 'locked';
-  }, []);
-
-  // Automatic lock policy: installed tablet PWA (or tablet fullscreen) only.
   useEffect(() => {
-    if (profile.type === 'tablet') {
-      if (profile.isInstalledPwa || isDocumentFullscreen()) {
-        void requestLock();
-      } else {
-        // Browser tab: the Screen Orientation API needs standalone/fullscreen.
-        setLockStatus('unsupported');
-      }
-      return;
-    }
+    const release = () => unlockOrientation();
+    release();
 
-    if (profile.type === 'phone' && profile.isInstalledPwa) {
-      // A landscape manifest orientation may have launched a phone sideways.
-      // Release it so the phone follows its physical portrait orientation.
-      unlockOrientation();
-    }
-
-    setLockStatus('not-applicable');
-  }, [profile.type, profile.isInstalledPwa, requestLock]);
-
-  // Re-evaluate after installation or when the user enters fullscreen.
-  useEffect(() => {
-    const refresh = () => {
-      const latestProfile = getDeviceProfile();
-      setProfile(latestProfile);
-
-      if (latestProfile.type !== 'tablet') return;
-
-      if (latestProfile.isInstalledPwa || isDocumentFullscreen()) {
-        void requestLock();
-        return;
-      }
-
-      // Left fullscreen on a browser tab: the browser releases the lock, so
-      // reflect that here instead of leaving a stale "locked" state.
-      unlockOrientation();
-      setLockStatus('unsupported');
-    };
-
-    const handleAppInstalled = () => refresh();
-    const handleFullscreenChange = () => refresh();
-
-    window.addEventListener('appinstalled', handleAppInstalled);
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
+    window.addEventListener('appinstalled', release);
+    document.addEventListener('fullscreenchange', release);
     return () => {
-      window.removeEventListener('appinstalled', handleAppInstalled);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, [requestLock]);
-
-  // Release any lock and invalidate in-flight attempts when this guard unmounts.
-  useEffect(() => {
-    mountedRef.current = true;
-
-    return () => {
-      mountedRef.current = false;
-      attemptIdRef.current += 1;
-      unlockOrientation();
+      window.removeEventListener('appinstalled', release);
+      document.removeEventListener('fullscreenchange', release);
     };
   }, []);
-
-  const retryLock = useCallback(() => {
-    void requestLock(true);
-  }, [requestLock]);
-
-  const showRotateNotice =
-    profile.type === 'tablet' &&
-    orientation === 'portrait' &&
-    lockStatus !== 'checking' &&
-    lockStatus !== 'pending' &&
-    lockStatus !== 'locked';
-
-  const canRetryLock =
-    profile.type === 'tablet' &&
-    profile.isInstalledPwa &&
-    canLockOrientation();
 
   return {
-    profile,
     orientation,
-    lockStatus,
-    showRotateNotice,
-    canRetryLock,
-    retryLock,
+    lockStatus: 'not-applicable' as OrientationLockStatus,
+    showRotateNotice: false,
+    canRetryLock: false,
+    retryLock: () => {},
   };
 }

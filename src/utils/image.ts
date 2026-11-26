@@ -84,13 +84,18 @@ export function prepareCatalogImage(file: File): Promise<Blob> {
   });
 }
 
-/** Nama produk lalai bagi muat naik berkumpulan, terbit dari nama fail. */
+/**
+ * Nama produk lalai bagi muat naik berkumpulan, terbit dari nama fail.
+ * Tanda `-` WAJIB dikekalkan (contoh: `Cincin-Emas-916.jpg` → `Cincin-Emas-916`).
+ * Underscore juga ditukar ke `-` supaya konsisten dengan naming gambar.
+ */
 export function productNameFromFileName(fileName: string): string {
   const base = fileName.replace(/\.[^.]+$/, '').trim();
   return (
     base
-      .replace(/[-_]+/g, ' ')
+      .replace(/_/g, '-')
+      .replace(/\s*-\s*/g, '-')
       .replace(/\s+/g, ' ')
-      .replace(/^\s+|\s+$/g, '') || 'Produk Jewelry'
+      .trim() || 'Produk Jewelry'
   );
 }
