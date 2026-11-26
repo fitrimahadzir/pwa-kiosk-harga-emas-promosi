@@ -149,6 +149,8 @@ GEMINI_API_KEY="your_gemini_api_key_here"
    `supabase/migrate-announcement.sql` (selamat dijalankan berulang kali).
    Untuk pangkalan sedia ada yang belum ada katalog, jalankan
    `supabase/migrate-jewelry-catalog.sql` dalam SQL Editor (idempotent).
+    Untuk membolehkan pemadaman resit di tab **Laporan**, jalankan
+    `supabase/migrate-delete-receipt.sql` (idempotent).
 2. **Authentication → Users → Add user** — cipta akaun admin (e-mel + kata laluan).
 3. Daftarkan akaun itu sebagai pentadbir:
 
@@ -201,6 +203,7 @@ npm run lint
    - **Berbilang Gambar Sekali** — pilih 40+ fail; setiap gambar menjadi satu produk dengan nama dari nama fail, kemudian edit butirannya dalam senarai;
    - gambar dimuat naik ke bucket Supabase **jewelry-catalog** (awam untuk dibaca, admin sahaja untuk menulis).
 7. Di kiosk, klik pautan **Katalog** di header (atau buka `#/katalog`). Cari produk, pilih kategori, kemudian klik kad untuk melihat detail. Butang tempahan akan ditambah kemudian — staf mengambil butiran pembeli secara manual buat masa ini.
+8. Tab **Laporan** menyenaraikan semua resit. Butang tong sampah pada setiap baris memadam resit (contohnya resit ujian) selepas pengesahan; hanya admin aktif yang dibenarkan.
 
 ---
 
@@ -213,6 +216,7 @@ npm run lint
 | "Gagal menyimpan harga ke server" | Sesi admin tamat atau RLS menolak — log masuk semula dan jalankan `supabase/schema.sql` |
 | Gagal simpan pengumuman / jadual tiada | Jalankan `supabase/migrate-announcement.sql` dalam Supabase SQL Editor |
 | "Bucket 'jewelry-catalog' belum ada" / katalog kosong | Jalankan `supabase/migrate-jewelry-catalog.sql` dalam Supabase SQL Editor |
+| "Gagal memadam resit" / fungsi tiada | Jalankan `supabase/migrate-delete-receipt.sql` dalam Supabase SQL Editor |
 | Font tidak muncul | Pastikan fail font berada di `public/font/The Seasons/` |
 | PWA tidak boleh dipasang | Pastikan HTTPS aktif atau gunakan localhost |
 

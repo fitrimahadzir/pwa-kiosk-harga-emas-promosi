@@ -1082,6 +1082,55 @@ export async function fetchReceipts(): Promise<ReceiptRecord[]> {
     }));
 }
 
+/** Hasil pemadaman resit dari Laporan admin. */
+export type ReceiptDeleteResult =
+  | { ok: true; id: string }
+  | { ok: false; error: string };
+
+/**
+ * Padam satu resit. Klien tiada DELETE terus — RPC SECURITY DEFINER
+ * `delete_kiosk_receipt` yang menyemak admin aktif dan skop outlet.
+ * Perlu migrasi `supabase/migrate-delete-receipt.sql` pada pangkalan sedia ada.
+ */
+export async function deleteReceipt(id: string): Promise<ReceiptDeleteResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: 'Supabase belum dikonfigurasi.' };
+  }
+
+  const numericId = Number(id);
+  if (!Number.isSafeInteger(numericId) || numericId <= 0) {
+    return { ok: false, error: 'ID resit tidak sah.' };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('delete_kiosk_receipt', {
+      p_id: numericId,
+    });
+
+    if (error) {
+      console.warn('[emaspos] Gagal memadam resit:', error.message);
+      return { ok: false, error: error.message || 'Gagal memadam resit.' };
+    }
+
+    const payload = data as
+      | { ok?: boolean; error?: string; id?: string | number }
+      | null;
+
+    if (payload && payload.ok === false) {
+      return {
+        ok: false,
+        error: payload.error?.trim() || 'Gagal memadam resit.',
+      };
+    }
+
+    return { ok: true, id: String(payload?.id ?? id) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Gagal memadam resit.';
+    console.warn('[emaspos] Gagal memadam resit:', message);
+    return { ok: false, error: message };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Realtime — hanya isyarat, pemanggil mesti fetch semula dari server
 // ---------------------------------------------------------------------------

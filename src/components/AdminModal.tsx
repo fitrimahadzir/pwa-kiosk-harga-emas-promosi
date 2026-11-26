@@ -14,7 +14,6 @@ import {
   Sparkles,
   LogOut,
   Menu,
-  LayoutDashboard,
   MapPin,
   Loader2,
   Database,
@@ -267,42 +266,6 @@ function initials(name: string) {
   if (parts.length === 0) return 'AD';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  accent = 'gold',
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  hint: string;
-  accent?: 'gold' | 'success' | 'warm' | 'cream';
-}) {
-  const accentClass = {
-    gold: 'border-gold/35 bg-gold/15 text-gold',
-    success: 'border-success/35 bg-success/15 text-success',
-    warm: 'border-warm/35 bg-warm/15 text-warm',
-    cream: 'border-cream/30 bg-cream/10 text-cream/80',
-  }[accent];
-
-  return (
-    <div className="rounded-2xl border border-line/70 bg-gradient-to-r from-[#3b0707] to-[#6a1a17] p-4 shadow-[0_20px_45px_-30px_rgba(0,0,0,0.9)] sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="gr-kicker">{label}</p>
-          <p className="mt-2 font-heading text-[1.65rem] leading-none text-cream sm:text-[2rem]">{value}</p>
-          <p className="mt-2 truncate text-[10px] uppercase tracking-[0.12em] text-cream/55">{hint}</p>
-        </div>
-        <div className={`grid size-9 shrink-0 place-items-center rounded-lg border ${accentClass}`}>
-          <Icon className="size-4" />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -573,7 +536,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     [],
   );
 
-  const activePromoCount = draftPromos.filter((promo) => promo.isActive).length;
   const page = PAGE_COPY[activeTab];
 
   const announcementPayload = joinAnnouncementMessages(
@@ -1300,38 +1262,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </button>
             )}
           </div>
-
-          {activeTab !== 'prices' && activeTab !== 'announcement' && (
-            <div className="mt-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatCard
-                icon={LayoutDashboard}
-                label="Emas 999"
-                value={formatMYR(prices['999'].sellPrice)}
-                hint={`Beli semula ${formatMYR(prices['999'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
-              />
-              <StatCard
-                icon={Coins}
-                label="Emas 916"
-                value={formatMYR(prices['916'].sellPrice)}
-                hint={`Beli semula ${formatMYR(prices['916'].buyPrice)} • ${currentOutletName || 'outlet ini'}`}
-                accent="cream"
-              />
-              <StatCard
-                icon={ImageIcon}
-                label="Poster aktif"
-                value={String(activePromoCount)}
-                hint={`${draftPromos.length} poster keseluruhan`}
-                accent="success"
-              />
-              <StatCard
-                icon={History}
-                label="Log harga"
-                value={String(history.length)}
-                hint="Rekod perubahan kaunter"
-                accent="warm"
-              />
-            </div>
-          )}
 
           {activeTab === 'prices' && (
             <>

@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  CheckCircle2,
   Download,
   FileSpreadsheet,
   FileText,
   Loader2,
   RefreshCw,
   Search,
+  Trash2,
 } from 'lucide-react';
 import type { ReceiptRecord } from '../types/gold';
-import { fetchReceipts } from '../utils/storage';
+import { deleteReceipt, fetchReceipts } from '../utils/storage';
 import { formatMYR, formatWeight } from '../utils/calculator';
 
 const MONTHS_MS = [
@@ -45,10 +47,13 @@ export function ReceiptReport() {
   const [outletFilter, setOutletFilter] = useState<string>('all');
   const [search, setSearch] = useState<string>('');
   const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
     setError('');
+    setNotice('');
     try {
       setReceipts(await fetchReceipts());
     } catch (err) {
@@ -253,6 +258,32 @@ export function ReceiptReport() {
     }
   };
 
+  /** Padam satu resit (cth. resit ujian) selepas pengesahan admin. */
+  const handleDelete = async (receipt: ReceiptRecord) => {
+    if (deletingId) return;
+
+    const label = receipt.receiptNumber || receipt.quoteId;
+    const confirmed = window.confirm(
+      `Padam resit ${label}?\nTindakan ini tidak boleh dibatalkan.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(receipt.id);
+    setError('');
+    setNotice('');
+    try {
+      const result = await deleteReceipt(receipt.id);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setReceipts((prev) => prev.filter((item) => item.id !== receipt.id));
+      setNotice(`Resit ${label} berjaya dipadam.`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <section className="gr-card-light mt-6 overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line/15 p-5">
@@ -261,6 +292,7 @@ export function ReceiptReport() {
           <p className="mt-1.5 font-heading text-xl text-maroon-deep">Resit &amp; sebut harga</p>
           <p className="mt-1 text-sm text-maroon-deep/55">
             Setiap resit yang disahkan staf di tablet kaunter direkodkan di sini.
+            Resit ujian boleh dipadam menggunakan butang di setiap baris.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -347,6 +379,13 @@ export function ReceiptReport() {
         </div>
       )}
 
+      {notice && (
+        <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-success/40 bg-success/10 px-3 py-2.5 text-xs text-success">
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
@@ -357,19 +396,20 @@ export function ReceiptReport() {
               <th className="px-5 py-3 font-semibold">Item</th>
               <th className="px-5 py-3 text-right font-semibold">Berat</th>
               <th className="px-5 py-3 text-right font-semibold">Jumlah</th>
+              <th className="px-5 py-3 text-right font-semibold">Tindakan</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line/10">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-xs text-maroon-deep/45">
+                <td colSpan={7} className="px-5 py-12 text-center text-xs text-maroon-deep/45">
                   <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gold-deep" />
                   Memuatkan resit...
                 </td>
               </tr>
             ) : exportRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-xs uppercase tracking-[0.14em] text-maroon-deep/35">
+                <td colSpan={7} className="px-5 py-12 text-center text-xs uppercase tracking-[0.14em] text-maroon-deep/35">
                   Tiada resit untuk dipaparkan
                 </td>
               </tr>
@@ -383,6 +423,25 @@ export function ReceiptReport() {
                   <td className="whitespace-nowrap px-5 py-3 text-right text-xs tabular-nums text-maroon-deep/65">{row.berat}</td>
                   <td className="whitespace-nowrap px-5 py-3 text-right text-sm font-semibold tabular-nums text-maroon">
                     {row.jumlah}
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const receipt = receipts.find((item) => item.id === row.id);
+                        if (receipt) void handleDelete(receipt);
+                      }}
+                      disabled={deletingId !== null}
+                      aria-label={`Padam resit ${row.noResit}`}
+                      title="Padam resit"
+                      className="inline-flex size-8 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {deletingId === row.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )}
+                    </button>
                   </td>
                 </tr>
               ))

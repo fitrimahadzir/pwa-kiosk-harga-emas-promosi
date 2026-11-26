@@ -1110,6 +1110,59 @@ $$;
 revoke all on function public.record_kiosk_receipt(jsonb) from public;
 grant execute on function public.record_kiosk_receipt(jsonb) to anon, authenticated;
 
+-- Padam resit dari Laporan admin. Klien tiada DELETE terus (RLS baca sahaja);
+-- RPC SECURITY DEFINER ini menyemak admin aktif + skop outlet sebelum padam.
+create or replace function public.delete_kiosk_receipt(p_id bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_outlet text;
+  v_allowed boolean := false;
+begin
+  if p_id is null or p_id <= 0 then
+    return jsonb_build_object('ok', false, 'error', 'ID resit tidak sah.');
+  end if;
+
+  if auth.uid() is null or not public.is_kiosk_admin() then
+    raise exception 'Hanya admin yang boleh memadam resit.';
+  end if;
+
+  select r.outlet_name
+    into v_outlet
+  from public.kiosk_receipts r
+  where r.id = p_id;
+
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Resit tidak dijumpai.');
+  end if;
+
+  select exists (
+    select 1
+    from public.kiosk_admins a
+    where a.user_id = auth.uid()
+      and a.is_active = true
+      and (
+        nullif(btrim(a.outlet_name), '') is null
+        or a.outlet_name = v_outlet
+      )
+  ) into v_allowed;
+
+  if not v_allowed then
+    raise exception 'Admin ini tidak dibenarkan memadam resit outlet berkenaan.';
+  end if;
+
+  delete from public.kiosk_receipts where id = p_id;
+
+  return jsonb_build_object('ok', true, 'id', p_id::text);
+end;
+$$;
+
+revoke all on function public.delete_kiosk_receipt(bigint) from public, anon;
+grant execute on function public.delete_kiosk_receipt(bigint) to authenticated;
+
 -- Muat semula schema cache PostgREST selepas jadual/bucket katalog ditambah.
 notify pgrst, 'reload schema';
 
