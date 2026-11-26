@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { LogOut, Calculator, ShieldCheck, Users, Menu, X, Gem } from 'lucide-react';
 import { ShopSettings } from '../types/gold';
 import { useHideOnScrollDown } from '../hooks/useHideOnScrollDown';
-import { useIsTablet } from '../hooks/useIsTablet';
+import { useIsCompactDevice } from '../hooks/useIsCompactDevice';
 import { BrandLogo } from './BrandLogo';
 
 interface HeaderProps {
@@ -32,28 +32,28 @@ export const Header: React.FC<HeaderProps> = ({
   showCatalog = false,
 }) => {
   const isScrollHidden = useHideOnScrollDown();
-  const isTablet = useIsTablet();
-  const [isTabletMenuOpen, setIsTabletMenuOpen] = useState(false);
+  const isCompact = useIsCompactDevice();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Tablet kiosk: header is never docked in the layout — it only appears as a
-  // temporary overlay when the small floating control is tapped. This gives
-  // detail pages the full viewport height.
+  // Phone + tablet kiosk: header is never docked in the layout — by default
+  // only a small floating hamburger is visible; tapping it opens the header
+  // as a temporary overlay. This gives detail pages the full viewport height.
   useEffect(() => {
-    if (!isTabletMenuOpen) return;
-    const close = () => setIsTabletMenuOpen(false);
+    if (!isMenuOpen) return;
+    const close = () => setIsMenuOpen(false);
     window.addEventListener('scroll', close, { passive: true });
     return () => window.removeEventListener('scroll', close);
-  }, [isTabletMenuOpen]);
+  }, [isMenuOpen]);
 
-  const headerPositionClass = isTablet
-    ? isTabletMenuOpen
+  const headerPositionClass = isCompact
+    ? isMenuOpen
       ? 'fixed inset-x-0 top-0 z-40 shadow-[0_18px_40px_-20px_rgba(42,4,4,0.85)]'
       : 'hidden'
     : `sticky top-0 z-30 transition-transform duration-300 ease-out will-change-transform ${
         isScrollHidden ? '-translate-y-full' : 'translate-y-0'
       }`;
 
-  const closeTabletMenu = () => setIsTabletMenuOpen(false);
+  const closeMenu = () => setIsMenuOpen(false);
 
   const navButtonClass = (isActive: boolean) =>
     `inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
@@ -66,21 +66,21 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      {isTablet && (
+      {isCompact && (
         <button
           type="button"
-          onClick={() => setIsTabletMenuOpen((open) => !open)}
+          onClick={() => setIsMenuOpen((open) => !open)}
           aria-controls="kiosk-header"
-          aria-expanded={isTabletMenuOpen}
-          aria-label={isTabletMenuOpen ? 'Tutup kawalan kiosk' : 'Buka kawalan kiosk'}
-          title={isTabletMenuOpen ? 'Tutup kawalan kiosk' : 'Buka kawalan kiosk'}
+          aria-expanded={isMenuOpen}
+          aria-label={isMenuOpen ? 'Tutup kawalan kiosk' : 'Buka kawalan kiosk'}
+          title={isMenuOpen ? 'Tutup kawalan kiosk' : 'Buka kawalan kiosk'}
           className={`fixed right-4 z-50 inline-flex size-9 items-center justify-center rounded-lg border border-gold/50 bg-maroon-deep/95 text-gold shadow-lg backdrop-blur-sm transition active:scale-95 ${
-            isTabletMenuOpen
+            isMenuOpen
               ? 'top-[calc(env(safe-area-inset-top)_+_4.75rem)]'
               : 'top-[calc(env(safe-area-inset-top)_+_0.75rem)]'
           }`}
         >
-          {isTabletMenuOpen ? <X size={17} /> : <Menu size={17} />}
+          {isMenuOpen ? <X size={17} /> : <Menu size={17} />}
         </button>
       )}
 
@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={(event) => {
                   event.preventDefault();
                   onOpenCatalog();
-                  closeTabletMenu();
+                  closeMenu();
                 }}
                 className={navButtonClass(showCatalog)}
                 title="Buka Katalog Jewelry"
@@ -122,7 +122,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => {
                   onOpenStaff?.();
-                  closeTabletMenu();
+                  closeMenu();
                 }}
                 className={staffButtonClass}
                 title="Lihat Prestasi Staff"
@@ -137,7 +137,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => {
                   onToggleCalculator?.();
-                  closeTabletMenu();
+                  closeMenu();
                 }}
                 className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors ${
                   showCalculator
@@ -158,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => {
                   onOpenAdmin?.();
-                  closeTabletMenu();
+                  closeMenu();
                 }}
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold"
                 title="Log masuk pentadbir"
@@ -171,7 +171,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => {
                 onLogout();
-                closeTabletMenu();
+                closeMenu();
               }}
               className="inline-flex h-9 items-center justify-center rounded-lg border border-gold/40 bg-transparent px-2 text-xs font-semibold text-gold-soft transition-colors hover:border-gold/60 hover:bg-gold/10 hover:text-gold"
               title="Tukar outlet"

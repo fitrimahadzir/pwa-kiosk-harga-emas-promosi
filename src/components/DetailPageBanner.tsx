@@ -9,6 +9,8 @@ interface DetailPageBannerProps {
   title: string;
   /** Poster guna `contain` supaya tidak terpotong; banner guna `cover`. */
   fit?: 'cover' | 'contain';
+  /** Ikut penuh lebar lajur (tanpa had max-w berasaskan tinggi skrin). */
+  fillColumn?: boolean;
 }
 
 /**
@@ -22,8 +24,15 @@ export const DetailPageBanner: React.FC<DetailPageBannerProps> = ({
   kicker = 'Gold Reserve',
   title,
   fit = 'cover',
+  fillColumn = false,
 }) => (
-  <div className="relative flex w-full max-w-[min(420px,max(160px,calc((100dvh_-_15rem)_*_0.75)))] items-center justify-center self-start overflow-hidden rounded-2xl border border-[#d4a13a]/30 bg-[#2a0404] p-2.5 shadow-xl sm:p-3">
+  <div
+    className={`relative flex w-full items-center justify-center self-start overflow-hidden rounded-2xl border border-[#d4a13a]/30 bg-[#2a0404] p-2.5 shadow-xl sm:p-3 ${
+      fillColumn
+        ? ''
+        : 'max-w-[min(420px,max(160px,calc((100dvh_-_15rem)_*_0.75)))]'
+    }`}
+  >
     <img
       src={imageUrl}
       alt={alt}

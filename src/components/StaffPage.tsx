@@ -60,12 +60,13 @@ export const StaffPage: React.FC<StaffPageProps> = ({ performance, onBack }) => 
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-6">
-        {/* Left: permanent 3:4 banner. Tiada mx-auto — tepi kiri image
-            sejajar dengan tepi kiri title di atas. */}
+        {/* Left: banner 3:4 yang mengikut penuh lebar lajur (tiada had
+            berasaskan tinggi skrin). Tepi kiri sejajar dengan tajuk di atas. */}
         <DetailPageBanner
           imageUrl="/images/3-4-RATIO.jpg"
           alt="Banner prestasi staff Gold Reserve"
           title="Prestasi Jualan Staff"
+          fillColumn
         />
 
         {/* Right: per-outlet staff performance */}
